@@ -1,0 +1,6 @@
+transformers>=4.21.0
+accelerate
+datasets
+hydra-core
+scikit-learn
+torch

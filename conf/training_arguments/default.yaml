@@ -1,0 +1,121 @@
+# TrainingArguments
+# https://huggingface.co/docs/transformers/main_classes/trainer#transformers.TrainingArguments
+
+
+# output
+output_dir: model_output
+overwrite_output_dir: no
+
+# training
+do_train: no
+resume_from_checkpoint:
+
+# hyperparams
+per_device_train_batch_size: 8
+per_device_eval_batch_size: 8
+gradient_accumulation_steps: 1
+gradient_checkpointing: no
+group_by_length: yes
+learning_rate: 5e-5
+weight_decay: 0.0
+seed: 42
+
+# schedule + steps
+num_train_epochs: 3
+lr_scheduler_type: linear # linear, cosine, cosine_with_restarts, polynomial, constant, constant_with_warmup
+warmup_ratio: 0.0
+warmup_steps: 0
+max_steps: -1
+
+# optimizer
+adam_beta1: 0.9
+adam_beta2: 0.999
+adam_epsilon: 1e-8
+max_grad_norm: 1.0
+optim: 'adamw_hf' # adamw_hf, adamw_torch, adamw_apex_fused, or adafactor
+adafactor: no
+
+# logging
+log_level: "passive"
+log_level_replica: "passive"
+log_on_each_node: yes
+logging_dir: null
+logging_strategy: steps
+logging_first_step: no
+logging_steps: 500
+logging_nan_inf_filter: yes
+
+# saving
+save_strategy: "steps"
+save_steps: 500
+save_total_limit: null
+
+# dtype
+fp16: no
+bf16: no # bf16 requires Ampere GPUs or newer (A100, A6000, rtx 3080)
+fp16_opt_level: "O1"
+half_precision_backend: "auto"
+bf16_full_eval: no
+fp16_full_eval: no
+tf32: no
+
+# evaluation/prediction
+do_eval: no
+evaluation_strategy: 'no'
+eval_delay: 0
+include_inputs_for_metrics: no
+do_predict: no
+jit_mode_eval: no
+
+# hub
+hub_model_id: null
+hub_token: null
+
+# reporting
+report_to: null
+
+# rarely used
+debug: ''
+prediction_loss_only: no
+eval_accumulation_steps: null
+use_ipex: no
+save_on_each_node: no
+no_cuda: no
+# use_mps_device: no
+data_seed: null
+local_rank: -1
+xpu_backend: null
+tpu_num_cores: null
+tpu_metrics_debug: no
+dataloader_drop_last: no
+past_index: -1
+run_name: null
+disable_tqdm: null
+remove_unused_columns: yes
+label_names: null
+greater_is_better: null
+ignore_data_skip: no
+sharded_ddp: ''
+fsdp: ''
+fsdp_min_num_params: 0
+fsdp_transformer_layer_cls_to_wrap: null
+deepspeed: null
+label_smoothing_factor: 0.0
+length_column_name: length
+ddp_find_unused_parameters: null
+ddp_bucket_cap_mb: null
+skip_memory_metrics: yes
+use_legacy_prediction_loop: no
+# deprecated
+per_gpu_train_batch_size: null
+per_gpu_eval_batch_size: null
+fp16_backend: auto 
+push_to_hub_model_id: null
+push_to_hub_organization: null
+push_to_hub_token: null
+# _n_gpu: 
+mp_parameters: ''
+auto_find_batch_size: no
+full_determinism: no
+torchdynamo: no
+ray_scope: last

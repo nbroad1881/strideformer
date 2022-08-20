@@ -1,0 +1,51 @@
+# Default configuration
+
+defaults:
+  - data: default
+  - training_arguments: default
+  - model: default
+  - mlflow: default
+  - wandb: default
+  - _self_ # attributes in this file will override defaults
+
+
+model:
+  model_name_or_path:  "sentence-transformers/all-MiniLM-L12-v2"
+  hidden_act: gelu
+  intermediate_size: 3072
+  layer_norm_eps: 1e-7
+  num_attention_heads: 12
+  num_hidden_layers: 12
+
+  
+data:
+  max_seq_length: 512
+  pad_multiple: 8
+  stride: 256
+  n_rows: 2000
+  
+training_arguments:
+  do_train: yes
+  do_eval: yes
+  
+  evaluation_strategy: "epoch"
+  fp16: yes
+  
+  learning_rate: 1e-5
+  per_device_train_batch_size: 2
+  per_device_eval_batch_size: 2
+  gradient_accumulation_steps: 2
+  
+  metric_for_best_model: "f1_micro"
+  greater_is_better: yes
+  report_to: "wandb"
+  log_level: "warning"
+  save_strategy: "epoch"
+  logging_steps: 10
+  save_total_limit: 2
+  
+# general configuration
+num_proc: 7
+task: text-classification
+language: en
+project_name: strided-longformer

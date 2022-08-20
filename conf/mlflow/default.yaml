@@ -1,0 +1,9 @@
+log_artifact: 'FALSE'
+experiment_name: null
+tags: 
+  test: "TRUE"
+  model_type: transformer
+nested_run: "FALSE"
+run_id: null
+flatten_params: "FALSE"
+tracking_uri: null

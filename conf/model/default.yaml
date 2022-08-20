@@ -1,0 +1,7 @@
+model_name_or_path: "allenai/longformer-base-4096"
+config_name: null # Pretrained config name or path if not the same as model_name
+tokenizer_name: null # Pretrained tokenizer name or path if not the same as model_name"
+model_revision: main
+use_auth_token: no
+from_tf: no # set to 'yes' if loading from tensorflow weights
+from_flax: no # set to 'yes' if loading from flax weights

@@ -136,8 +136,9 @@ class HealthFactProcessor:
                 self.tokenize,
                 tokenizer=self.tokenizer,
                 max_length=self.cfg.data.max_seq_length,
+                stride=self.cfg.data.stride,
             ),
-            batched=True,
+            batched=self.cfg.data.stride is None,
             num_proc=self.cfg.num_proc,
             remove_columns=cols,
         )
@@ -179,6 +180,8 @@ class HealthFactProcessor:
         # Need to track lengths of each sample
         if stride is not None:
             tokenized["length"] = len(tokenized["input_ids"])
+            tokenized["input_ids"] = tokenized["input_ids"][:50]
+            tokenized["attention_mask"] = tokenized["attention_mask"][:50]
 
         return tokenized
 

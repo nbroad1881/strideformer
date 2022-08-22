@@ -15,14 +15,15 @@ model:
   intermediate_size: 3072
   layer_norm_eps: 1e-7
   num_attention_heads: 12
-  num_hidden_layers: 12
+  num_hidden_layers: 24
 
   
 data:
-  max_seq_length: 512
+  max_seq_length: 384
   pad_multiple: 8
-  stride: 256
-  n_rows: 2000
+  stride: 128
+  n_rows: 1000
+  dataset_name: 'ccdv/arxiv-classification'
   
 training_arguments:
   do_train: yes
@@ -33,8 +34,8 @@ training_arguments:
   
   learning_rate: 1e-5
   per_device_train_batch_size: 2
-  per_device_eval_batch_size: 2
-  gradient_accumulation_steps: 2
+  per_device_eval_batch_size: 4
+  gradient_accumulation_steps: 1
   
   metric_for_best_model: "f1_micro"
   greater_is_better: yes

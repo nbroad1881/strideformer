@@ -13,12 +13,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Finetuning the sbert chunks for long sequence classification"""
+""" Finetuning short model chunks for long sequence classification"""
 
 import logging
 import os
 import math
-import logging
 from itertools import chain
 
 from tqdm.auto import tqdm
@@ -31,40 +30,24 @@ import datasets
 import transformers
 from transformers import (
     AutoConfig,
+    AutoModelForSequenceClassification,
     Trainer,
     TrainingArguments,
     set_seed,
     get_scheduler,
+    DataCollatorWithPadding,
 )
 from transformers.trainer_pt_utils import IterableDatasetShard
+from transformers.training_args import trainer_log_levels
 from accelerate import Accelerator
+from accelerate.logging import get_logger
 
 from utils import set_wandb_env_vars, set_mlflow_env_vars
 from model import StridedLongformer
 from data import DataModule, StridedLongformerCollator
 
 
-logger = logging.getLogger(__name__)
-
-
-def tokenize(example, tokenizer, max_length, stride):
-
-    tokenized_example = tokenizer(
-        # example["claim"],
-        # example["main_text"],
-        example["text"],
-        padding=True,
-        truncation=True,
-        max_length=max_length,
-        stride=stride,
-        return_overflowing_tokens=True,
-    )
-
-    tokenized_example["label"] = example["label"]
-    tokenized_example["length"] = len(tokenized_example["input_ids"])
-
-    return tokenized_example
-
+logger = get_logger(__name__)
 
 def training_loop(accelerator, model, optimizer, lr_scheduler, dataloaders, args):
 
@@ -92,7 +75,7 @@ def training_loop(accelerator, model, optimizer, lr_scheduler, dataloaders, args
 
             # We keep track of the loss at each epoch
             if args.report_to is not None:
-                epoch_loss += loss.detach().float()
+                epoch_loss += loss.detach().float()*batch["labels"].numel()
 
             loss = loss / args.gradient_accumulation_steps
             accelerator.backward(loss)
@@ -114,7 +97,7 @@ def training_loop(accelerator, model, optimizer, lr_scheduler, dataloaders, args
                         output_dir = os.path.join(args.output_dir, output_dir)
                     accelerator.save_state(output_dir)
 
-            if args.logging_strategy == "steps" and step % args.logging_steps == 0:
+            if args.logging_strategy == "steps" and (step + 1) % args.logging_steps == 0:
                 details = {
                     "train_loss": epoch_loss.item() / example_count,
                     "step": completed_steps,
@@ -302,12 +285,20 @@ def main(cfg: DictConfig) -> None:
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
-        level=logging.INFO,
+        level=training_args.log_level,
     )
     logger.info(accelerator.state, main_process_only=False)
+    
+    if training_args.log_level != -1:
+        logger.setLevel(training_args.log_level)
+    
     if accelerator.is_local_main_process:
-        datasets.utils.logging.set_verbosity_warning()
-        transformers.utils.logging.set_verbosity_info()
+        if training_args.log_level == -1:
+            datasets.utils.logging.set_verbosity_warning()
+            transformers.utils.logging.set_verbosity_info()
+        else:
+            datasets.utils.logging.set_verbosity(training_args.log_level)
+            transformers.utils.logging.set_verbosity(training_args.log_level)
     else:
         datasets.utils.logging.set_verbosity_error()
         transformers.utils.logging.set_verbosity_error()
@@ -329,7 +320,10 @@ def main(cfg: DictConfig) -> None:
     with training_args.main_process_first(desc="Dataset loading and tokenization"):
         data_module.prepare_dataset()
 
-    collator = StridedLongformerCollator(tokenizer=data_module.tokenizer)
+    if cfg.data.stride is not None:
+        collator = StridedLongformerCollator(tokenizer=data_module.tokenizer)
+    else:
+        collator = DataCollatorWithPadding(tokenizer=data_module.tokenizer, pad_to_multiple_of=cfg.data.pad_multiple)
 
     dataloaders = {}
 
@@ -362,25 +356,32 @@ def main(cfg: DictConfig) -> None:
             pin_memory=training_args.dataloader_pin_memory,
         )
 
-    # Start with the config for the sbert model
-    model_config = AutoConfig.from_pretrained(cfg.model.model_name_or_path)
-    model_config.update(
-        {
-            "sbert_model": cfg.model.model_name_or_path,
-            "num_labels": len(data_module.label2id),
-            "label2id": data_module.label2id,
-            "id2label": data_module.id2label,
-            "hidden_act": cfg.model.hidden_act,
-            "intermediate_size": cfg.model.intermediate_size,
-            "layer_norm_eps": cfg.model.layer_norm_eps,
-            "num_attention_heads": cfg.model.num_attention_heads,
-            "num_hidden_layers": cfg.model.num_hidden_layers,
-        }
+    model_config = AutoConfig.from_pretrained(
+        cfg.model.model_name_or_path,
+        num_labels=len(data_module.label2id),
+        label2id=data_module.label2id,
+        id2label=data_module.id2label,
     )
+    
+    if cfg.data.stride is not None:
+        model_config.update(
+            {
+                "short_model": cfg.model.model_name_or_path,
+                "hidden_act": cfg.model.hidden_act,
+                "intermediate_size": cfg.model.intermediate_size,
+                "layer_norm_eps": cfg.model.layer_norm_eps,
+                "num_attention_heads": cfg.model.num_attention_heads,
+                "num_hidden_layers": cfg.model.num_hidden_layers,
+            }
+        )
 
-    model = StridedLongformer.from_pretrained(
-        cfg.model.model_name_or_path, config=model_config
-    )
+        model = StridedLongformer.from_pretrained(
+            cfg.model.model_name_or_path, config=model_config
+        )
+    else:
+        model = AutoModelForSequenceClassification.from_pretrained(
+            cfg.model.model_name_or_path, config=model_config
+        )
 
     optimizer, lr_scheduler = get_optimizer_and_scheduler(
         model, dataloaders["train"], training_args

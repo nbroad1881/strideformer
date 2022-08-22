@@ -5,8 +5,3 @@ truncation: yes
 pad_multiple: 8
 # set to small number for debugging, -1 for all rows
 n_rows: -1  
-labels:
- - 'false' # need quotes otherwise interpreted as bool
- - mixture
- - 'true' # need quotes otherwise interpreted as bool
- - unproven

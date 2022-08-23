@@ -1,7 +1,8 @@
 # stride-former
 
-Using short models to classify long texts. Still a work-in-progress, but the general skeleton is there.
+Using short models to classify long texts. Still a work-in-progress, but the general skeleton is there. This is very similar to this: [Three-level Hierarchical Transformer Networks for Long-sequence and Multiple Clinical Documents Classification](https://arxiv.org/abs/2104.08444). 
 
+[Here is a good illustration from the paper.](https://www.semanticscholar.org/paper/Three-level-Hierarchical-Transformer-Networks-for-Si-Roberts/2cc7d0a242f8358bf5e3e41defd2e93e6297f74c/figure/0)
 ## How it works
 
 Since attention in transformers scales quadratically with sequence length, it can become infeasible to do full self-attention on sequences longer than 512 tokens. Models like [Longformer](https://arxiv.org/abs/2004.05150) and [Big Bird](https://arxiv.org/abs/2007.14062) use different attention mechanisms to reduce the quadratic scaling to linear scaling, allowing them to work on sequences up to 4096 tokens. This approach chunks the text into 512 token chunks and then aggregates those embeddings by putting them through another transformer. Because there are two models involved, the first one is a pre-trained sentence transformer to reduce the number of trainable parameters. The second model is a [generic transformer encoder](https://pytorch.org/docs/stable/generated/torch.nn.TransformerEncoder.html#torch.nn.TransformerEncoder).  This repo is called stride-former because there is an overlap between chunks of text - typically of 256 tokens, which is referred to as a stride. 

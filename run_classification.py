@@ -163,6 +163,8 @@ def eval_loop(accelerator, model, dataloader, prefix):
 
         eval_loss += outputs["loss"].detach().float()
 
+        # TODO: gather for distributed training
+
         preds = outputs["logits"].argmax(-1).detach().cpu().tolist()
         labels = batch["labels"].detach().cpu().tolist()
         count += len(labels)
@@ -261,6 +263,9 @@ def get_optimizer_and_scheduler(model, train_dataloader, args):
 @hydra.main(version_base=None, config_path="conf", config_name="config")
 def main(cfg: DictConfig) -> None:
 
+    # Save config
+    OmegaConf.save(cfg, "config.yaml")
+
     train_args = dict(cfg.training_arguments)
     del cfg.training_arguments
 
@@ -272,6 +277,7 @@ def main(cfg: DictConfig) -> None:
     if training_args.bf16:
         mixed_precision = "bf16"
 
+    # TODO: add logging with mlflow
     accelerator = Accelerator(
         mixed_precision=mixed_precision, log_with=training_args.report_to
     )

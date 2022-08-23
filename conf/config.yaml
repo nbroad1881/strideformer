@@ -49,4 +49,4 @@ training_arguments:
 num_proc: 7
 task: text-classification
 language: en
-project_name: strided-longformer
+project_name: stride-former

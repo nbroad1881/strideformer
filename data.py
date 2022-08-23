@@ -138,7 +138,7 @@ class HealthFactProcessor:
                 max_length=self.cfg.data.max_seq_length,
                 stride=self.cfg.data.stride,
             ),
-            batched=self.cfg.data.stride is None,
+            batched=self.cfg.data.stride is None or self.cfg.data.stride == 0,
             num_proc=self.cfg.num_proc,
             remove_columns=cols,
         )
@@ -232,7 +232,7 @@ class ArxivProcessor:
                 max_length=self.cfg.data.max_seq_length,
                 stride=self.cfg.data.stride,
             ),
-            batched=self.cfg.data.stride is None,
+            batched=self.cfg.data.stride is None or self.cfg.data.stride == 0,
             num_proc=self.cfg.num_proc,
             remove_columns=cols,
         )

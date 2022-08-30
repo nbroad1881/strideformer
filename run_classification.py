@@ -328,6 +328,13 @@ def main(cfg: DictConfig) -> None:
 
     if cfg.data.stride is not None:
         collator = StridedLongformerCollator(tokenizer=data_module.tokenizer)
+        
+        # batch_sizes must always be 1 when using strided approach
+        if training_args.per_device_train_batch_size != 1 or training_args.per_device_eval_batch_size != 1:
+            logger.warning("Batch size must be 1 when using strided approach. Changing to 1 now.")
+        training_args.per_device_train_batch_size = 1
+        training_args.per_device_eval_batch_size = 1
+
     else:
         collator = DataCollatorWithPadding(tokenizer=data_module.tokenizer, pad_to_multiple_of=cfg.data.pad_multiple)
 
@@ -373,6 +380,7 @@ def main(cfg: DictConfig) -> None:
         model_config.update(
             {
                 "short_model": cfg.model.model_name_or_path,
+                "short_model_max_chunks": cfg.model.short_model_max_chunks, # maximum number of chunks to break the document into
                 "hidden_act": cfg.model.hidden_act,
                 "intermediate_size": cfg.model.intermediate_size,
                 "layer_norm_eps": cfg.model.layer_norm_eps,

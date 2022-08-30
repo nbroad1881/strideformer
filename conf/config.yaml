@@ -10,22 +10,27 @@ defaults:
 
 
 model:
-  model_name_or_path:  "google/bigbird-roberta-base"
+  model_name_or_path:  "sentence-transformers/all-MiniLM-L12-v2"
   short_model_max_chunks: 128
   hidden_act: gelu
-  intermediate_size: 3072
+  intermediate_size: 4096
   layer_norm_eps: 1e-7
   num_attention_heads: 12
-  num_hidden_layers: 24
+  num_hidden_layers: 36
 
   
 data:
-  max_seq_length: 4096
-  pad_multiple: 512
-  stride: 0
+  max_seq_length: 384
+  pad_multiple: 8
+  stride: 128
   n_rows: 2000
-  map_batch_size: 100 # batch size when using `datasets.map`
-  dataset_name: 'ccdv/arxiv-classification'
+  map_batch_size: 500 # batch size when using `datasets.map`
+  dataset_name: null
+  data_files:
+    train:
+      - 'full_train.csv'
+    validation:
+      - 'full_val.csv'
   
 training_arguments:
   do_train: yes
@@ -35,10 +40,9 @@ training_arguments:
   fp16: yes
   
   learning_rate: 1e-5
-  per_device_train_batch_size: 4
-  per_device_eval_batch_size: 8
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 1
   gradient_accumulation_steps: 1
-  group_by_length: yes
   
   metric_for_best_model: "f1_micro"
   greater_is_better: yes

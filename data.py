@@ -86,7 +86,6 @@ class StridedLongformerCollator:
 
         label_key = "label" if "label" in features[0] else "labels"
 
-        lengths = [len(x["input_ids"]) for x in features]
         ids = list(chain(*[x["input_ids"] for x in features]))
         mask = list(chain(*[x["attention_mask"] for x in features]))
         labels = [x[label_key] for x in features]
@@ -100,7 +99,6 @@ class StridedLongformerCollator:
             "input_ids": torch.tensor(ids, dtype=torch.long),
             "attention_mask": torch.tensor(mask, dtype=torch.long),
             "labels": torch.tensor(labels, dtype=torch.long),
-            "lengths": lengths,
         }
 
 
@@ -158,7 +156,7 @@ class HealthFactProcessor:
         }
 
         # If stride is not None, using sbert approach
-        if stride is not None:
+        if stride is not None and stride > 0:
             tokenizer_kwargs.update(
                 {
                     "padding": True,
@@ -178,10 +176,10 @@ class HealthFactProcessor:
         tokenized["labels"] = examples["label"]
 
         # Need to track lengths of each sample
-        if stride is not None:
+        if stride is not None and stride > 0:
             tokenized["length"] = len(tokenized["input_ids"])
-            tokenized["input_ids"] = tokenized["input_ids"][:50]
-            tokenized["attention_mask"] = tokenized["attention_mask"][:50]
+            tokenized["input_ids"] = tokenized["input_ids"]
+            tokenized["attention_mask"] = tokenized["attention_mask"]
 
         return tokenized
 
@@ -233,6 +231,7 @@ class ArxivProcessor:
                 stride=self.cfg.data.stride,
             ),
             batched=self.cfg.data.stride is None or self.cfg.data.stride == 0,
+            batch_size=100,
             num_proc=self.cfg.num_proc,
             remove_columns=cols,
         )
@@ -250,7 +249,7 @@ class ArxivProcessor:
         }
 
         # If stride is not None, using sbert approach
-        if stride is not None:
+        if stride is not None and stride > 0:
             tokenizer_kwargs.update(
                 {
                     "padding": True,
@@ -269,7 +268,7 @@ class ArxivProcessor:
         tokenized["labels"] = examples["label"]
 
         # Need to track lengths of each sample
-        if stride is not None:
+        if stride is not None and stride > 0:
             tokenized["length"] = len(tokenized["input_ids"])
 
         return tokenized

@@ -13,6 +13,7 @@ class StridedLongformer(PreTrainedModel):
         self.config = config
 
         self.short = AutoModel.from_pretrained(config.short_model)
+        self.short_model_max_chunks = config.short_model_max_chunks
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=config.hidden_size,
             dim_feedforward=config.intermediate_size,
@@ -47,59 +48,29 @@ class StridedLongformer(PreTrainedModel):
         input_ids=None,
         attention_mask=None,
         labels=None,
-        lengths=None,
     ):
         """
-        input_ids will be of shape [num_chunks, sequence_length] where num_chunks can be across multiple documents
-        attention_mask is same shape as input_ids
-        labels is [num_documents, num_classes] if multilabel, [num_documents] for multiclass or regression
-        lengths is list of length [num_documents]
+        input_ids will be of shape [num_chunks, sequence_length] where num_chunks should only be for one document
+        labels is [num_classes] if multilabel, [1] for multiclass or regression
         """
 
         # short model is frozen, so no gradients needed
-        all_embeddings = []
         with torch.no_grad():
-            bs = 32
-            # TODO: have a better way to handle batch size for the short model
-
-            for i in range(0, input_ids.size(0), bs):
-                short_model_output = self.short_model(
-                    input_ids=input_ids[i : i + bs, :],
-                    attention_mask=attention_mask[i : i + bs, :],
-                )
-                embeddings = self.mean_pooling(
-                    short_model_output[0], attention_mask[i : i + bs, :]
-                )
-
-                all_embeddings.append(embeddings)
-
-        embeddings = torch.vstack(all_embeddings)
+            short_model_output = self.short_model(
+                input_ids=input_ids[:self.short_model_max_chunks, :],
+                attention_mask=attention_mask[:self.short_model_max_chunks, :],
+            )
+            embeddings = self.mean_pooling(
+                short_model_output[0], attention_mask[:self.short_model_max_chunks, :]
+            )
 
         # embeddings will be of shape [num_chunks, hidden_dim]
-        # Now need to be reshaped to separate documents
-
-        max_seq_len = max(lengths)
-        hidden_dim = embeddings.size(-1)
-
-        docs = []
-        start = 0
-        for length in lengths:
-            temp = embeddings[start : start + length, :]
-            z = torch.zeros(
-                (max_seq_len - length, hidden_dim), dtype=temp.dtype, device=temp.device
-            )
-            docs.append(torch.vstack([temp, z]).unsqueeze(0))
-            start += length
-
-        new_input = torch.vstack(docs)
-
-        attention_mask = torch.all(new_input == 0, dim=-1).to(new_input.device)
-
         transformer_output = self.transformer(
-            new_input, src_key_padding_mask=attention_mask
+            embeddings, 
         )
 
         logits = self.mean_pooling(self.classifier(transformer_output), attention_mask)
+        # logits will be of shape [num_labels]
 
         loss = None
         if labels is not None:

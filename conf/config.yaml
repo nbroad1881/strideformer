@@ -24,6 +24,7 @@ data:
   pad_multiple: 512
   stride: 0
   n_rows: 2000
+  map_batch_size: 100 # batch size when using `datasets.map`
   dataset_name: 'ccdv/arxiv-classification'
   
 training_arguments:

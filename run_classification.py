@@ -18,6 +18,7 @@
 import logging
 import os
 import math
+from pathlib import Path
 from itertools import chain
 
 from tqdm.auto import tqdm
@@ -174,7 +175,8 @@ def eval_loop(accelerator, model, dataloader, prefix):
         
         progress_bar.update(1)
 
-    y_preds = list(chain(*y_preds))
+    if isinstance(y_preds[0], list):
+        y_preds = list(chain(*y_preds))
     y_true = list(chain(*y_true))
 
     f1_micro = f1_score(y_true, y_preds, average="micro")
@@ -263,9 +265,6 @@ def get_optimizer_and_scheduler(model, train_dataloader, args):
 @hydra.main(version_base=None, config_path="conf", config_name="config")
 def main(cfg: DictConfig) -> None:
 
-    # Save config
-    OmegaConf.save(cfg, "config.yaml")
-
     train_args = dict(cfg.training_arguments)
     del cfg.training_arguments
 
@@ -326,7 +325,7 @@ def main(cfg: DictConfig) -> None:
     with training_args.main_process_first(desc="Dataset loading and tokenization"):
         data_module.prepare_dataset()
 
-    if cfg.data.stride is not None:
+    if cfg.data.stride is not None and cfg.data.stride > 0:
         collator = StridedLongformerCollator(tokenizer=data_module.tokenizer)
         
         # batch_sizes must always be 1 when using strided approach
@@ -376,7 +375,7 @@ def main(cfg: DictConfig) -> None:
         id2label=data_module.id2label,
     )
     
-    if cfg.data.stride is not None:
+    if cfg.data.stride is not None and cfg.data.stride > 0:
         model_config.update(
             {
                 "short_model": cfg.model.model_name_or_path,

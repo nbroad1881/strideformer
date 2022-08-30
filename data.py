@@ -9,6 +9,7 @@ import datasets
 from datasets import load_dataset
 from transformers import AutoTokenizer
 import torch
+from omegaconf import OmegaConf
 
 
 @dataclass
@@ -32,7 +33,10 @@ class DataModule:
         """
 
         if self.cfg.data.dataset_name is None:
-            processor = LocalFileProcessor
+            processor = LocalFileProcessor(
+                cfg=self.cfg,
+                tokenizer=self.tokenizer,
+            )
         else:
             processor = name2processor[self.cfg.data.dataset_name](
                 cfg=self.cfg,
@@ -88,7 +92,6 @@ class StridedLongformerCollator:
 
 
         """
-
         label_key = "label" if "label" in features[0] else "labels"
 
         ids = list(chain(*[x["input_ids"] for x in features]))
@@ -120,7 +123,7 @@ class GenericDatasetProcessor:
 
     def set_label2id(self, train_dataset):
 
-        labels = train_dataset.unique(self.label_col)
+        labels = train_dataset.unique(self.cfg.data.label_col)
         labels = sorted(labels)
 
         self.label2id = {label: i for i, label in enumerate(labels)}
@@ -277,8 +280,9 @@ class LocalFileProcessor:
 
         if filetype not in {"csv", "json", "parquet"}:
             raise ValueError(f"Files should end in 'csv', 'json', or 'parquet', not {filetype}.")
-
-        raw_dataset = load_dataset(filetype, data_files=self.cfg.data.data_files)
+       
+        data_files = OmegaConf.to_container(self.cfg.data.data_files)
+        raw_dataset = load_dataset(filetype, data_files=data_files)
 
         # Limit the number of rows, if desired
         if self.cfg.data.n_rows is not None and self.cfg.data.n_rows > 0:
@@ -288,6 +292,17 @@ class LocalFileProcessor:
 
         cols = raw_dataset["train"].column_names
         self.set_label2id(raw_dataset["train"])
+        
+        raw_dataset = raw_dataset.map(
+            partial(
+                change_label_to_int,
+                label2id=self.label2id,
+                label_col=self.cfg.data.label_col,
+            ),
+            batched=True,
+            num_proc=self.cfg.num_proc,
+        )
+        
 
         tokenized_dataset = raw_dataset.map(
             partial(
@@ -308,7 +323,7 @@ class LocalFileProcessor:
 
     def set_label2id(self, train_dataset):
 
-        labels = train_dataset.unique(self.label_col)
+        labels = train_dataset.unique(self.cfg.data.label_col)
         labels = sorted(labels)
 
         self.label2id = {label: i for i, label in enumerate(labels)}
@@ -359,7 +374,17 @@ def tokenize(
     return tokenized
 
 
-# TODO: Make Default processor
+def change_label_to_int(example, label2id, label_col):
+    if isinstance(example[label_col], list):
+        return {
+            label_col: [label2id[l] for l in example[label_col]]
+        }
+    return {
+            label_col: label2id[example[label_col]]
+        }
+                       
+
+
 
 # map dataset name to processor
 name2processor = defaultdict(lambda: GenericDatasetProcessor)

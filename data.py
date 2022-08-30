@@ -1,6 +1,8 @@
+from pathlib import Path
 from itertools import chain
 from functools import partial
-from typing import Dict, List
+from typing import Dict
+from collections import defaultdict
 from dataclasses import dataclass
 
 import datasets
@@ -29,15 +31,18 @@ class DataModule:
         If debugging, take small subset of the full dataset.
         """
 
-        processor = name2processor[self.cfg.data.dataset_name](
-            cfg=self.cfg,
-            tokenizer=self.tokenizer,
-        )
+        if self.cfg.data.dataset_name is None:
+            processor = LocalFileProcessor
+        else:
+            processor = name2processor[self.cfg.data.dataset_name](
+                cfg=self.cfg,
+                tokenizer=self.tokenizer,
+            )
+
+        self.raw_dataset, self.tokenized_dataset = processor.prepare_dataset()
 
         self.label2id = processor.get_label2id()
         self.id2label = {i: l for l, i in self.label2id.items()}
-
-        self.raw_dataset, self.tokenized_dataset = processor.prepare_dataset()
 
     def get_train_dataset(self, tokenized: bool = True) -> datasets.Dataset:
         if tokenized:
@@ -102,6 +107,59 @@ class StridedLongformerCollator:
         }
 
 
+class GenericDatasetProcessor:
+    """
+    Can load any dataset from the Hub.
+    """
+
+    def __init__(self, cfg, tokenizer):
+        super().__init__()
+
+        self.cfg = cfg
+        self.tokenizer = tokenizer
+
+    def set_label2id(self, train_dataset):
+
+        labels = train_dataset.unique(self.label_col)
+        labels = sorted(labels)
+
+        self.label2id = {label: i for i, label in enumerate(labels)}
+
+    def get_label2id(self):
+        return self.label2id
+
+    def prepare_dataset(self):
+        raw_dataset = load_dataset(
+            self.cfg.data.dataset_name, self.cfg.data.dataset_config_name
+        )
+
+        # Limit the number of rows, if desired
+        if self.cfg.data.n_rows is not None and self.cfg.data.n_rows > 0:
+            for split in raw_dataset:
+                max_split_samples = min(self.cfg.data.n_rows, len(raw_dataset[split]))
+                raw_dataset[split] = raw_dataset[split].select(range(max_split_samples))
+
+        cols = raw_dataset["train"].column_names
+
+        tokenized_dataset = raw_dataset.map(
+            partial(
+                tokenize,
+                tokenizer=self.tokenizer,
+                max_length=self.cfg.data.max_seq_length,
+                stride=self.cfg.data.stride,
+                text_col=self.cfg.data.text_col,
+                text_pair_col=self.cfg.data.text_pair_col,
+                label_col=self.cfg.data.label_col,
+            ),
+            batched=self.cfg.data.stride in {None, 0},
+            batch_size=self.cfg.data.map_batch_size,
+            num_proc=self.cfg.num_proc,
+            remove_columns=cols,
+        )
+
+        return raw_dataset, tokenized_dataset
+
+
 class HealthFactProcessor:
     def __init__(self, cfg, tokenizer):
         super().__init__()
@@ -131,57 +189,18 @@ class HealthFactProcessor:
 
         tokenized_dataset = raw_dataset.map(
             partial(
-                self.tokenize,
+                tokenize,
                 tokenizer=self.tokenizer,
                 max_length=self.cfg.data.max_seq_length,
                 stride=self.cfg.data.stride,
             ),
-            batched=self.cfg.data.stride is None or self.cfg.data.stride == 0,
+            batched=self.cfg.data.stride in {None, 0},
+            batch_size=self.cfg.data.map_batch_size,
             num_proc=self.cfg.num_proc,
             remove_columns=cols,
         )
 
         return raw_dataset, tokenized_dataset
-
-    @staticmethod
-    def tokenize(examples, tokenizer, max_length, stride=None):
-        """
-        Tokenize texts by putting claim text in front of main text.
-
-        If using a small model, can stride over the text.
-        """
-
-        tokenizer_kwargs = {
-            "padding": False,
-        }
-
-        # If stride is not None, using sbert approach
-        if stride is not None and stride > 0:
-            tokenizer_kwargs.update(
-                {
-                    "padding": True,
-                    "stride": stride,
-                    "return_overflowing_tokens": True,
-                }
-            )
-
-        tokenized = tokenizer(
-            examples["claim"],
-            examples["main_text"],
-            truncation=True,
-            max_length=max_length,
-            **tokenizer_kwargs,
-        )
-
-        tokenized["labels"] = examples["label"]
-
-        # Need to track lengths of each sample
-        if stride is not None and stride > 0:
-            tokenized["length"] = len(tokenized["input_ids"])
-            tokenized["input_ids"] = tokenized["input_ids"]
-            tokenized["attention_mask"] = tokenized["attention_mask"]
-
-        return tokenized
 
 
 class ArxivProcessor:
@@ -225,59 +244,129 @@ class ArxivProcessor:
 
         tokenized_dataset = raw_dataset.map(
             partial(
-                self.tokenize,
+                tokenize,
                 tokenizer=self.tokenizer,
                 max_length=self.cfg.data.max_seq_length,
                 stride=self.cfg.data.stride,
             ),
-            batched=self.cfg.data.stride is None or self.cfg.data.stride == 0,
-            batch_size=100,
+            batched=self.cfg.data.stride in {None, 0},
+            batch_size=self.cfg.data.map_batch_size,
             num_proc=self.cfg.num_proc,
             remove_columns=cols,
         )
 
         return raw_dataset, tokenized_dataset
 
-    @staticmethod
-    def tokenize(examples, tokenizer, max_length, stride=None):
-        """
-        If using a small model, can stride over the text.
-        """
 
-        tokenizer_kwargs = {
-            "padding": False,
-        }
+class LocalFileProcessor:
+    """
+    Can load csv, json, or parquet files that are on local storage.
+    """
 
-        # If stride is not None, using sbert approach
-        if stride is not None and stride > 0:
-            tokenizer_kwargs.update(
-                {
-                    "padding": True,
-                    "stride": stride,
-                    "return_overflowing_tokens": True,
-                }
-            )
+    def __init__(self, cfg, tokenizer):
+        super().__init__()
 
-        tokenized = tokenizer(
-            examples["text"],
-            truncation=True,
-            max_length=max_length,
-            **tokenizer_kwargs,
+        self.cfg = cfg
+        self.tokenizer = tokenizer
+
+    def prepare_dataset(self):
+
+        # get ending of file (csv, json, parquet)
+        filetype = Path(self.cfg.data.data_files["train"][0]).suffix
+        filetype = filetype.lstrip(".")  # suffix keeps period
+
+        if filetype not in {"csv", "json", "parquet"}:
+            raise ValueError(f"Files should end in 'csv', 'json', or 'parquet', not {filetype}.")
+
+        raw_dataset = load_dataset(filetype, data_files=self.cfg.data.data_files)
+
+        # Limit the number of rows, if desired
+        if self.cfg.data.n_rows is not None and self.cfg.data.n_rows > 0:
+            for split in raw_dataset:
+                max_split_samples = min(self.cfg.data.n_rows, len(raw_dataset[split]))
+                raw_dataset[split] = raw_dataset[split].select(range(max_split_samples))
+
+        cols = raw_dataset["train"].column_names
+        self.set_label2id(raw_dataset["train"])
+
+        tokenized_dataset = raw_dataset.map(
+            partial(
+                tokenize,
+                tokenizer=self.tokenizer,
+                max_length=self.cfg.data.max_seq_length,
+                stride=self.cfg.data.stride,
+                text_col=self.cfg.data.text_col,
+                label_col=self.cfg.data.label_col,
+            ),
+            batched=self.cfg.data.stride in {None, 0},
+            batch_size=self.cfg.data.map_batch_size,
+            num_proc=self.cfg.num_proc,
+            remove_columns=cols,
         )
 
-        tokenized["labels"] = examples["label"]
+        return raw_dataset, tokenized_dataset
 
-        # Need to track lengths of each sample
-        if stride is not None and stride > 0:
-            tokenized["length"] = len(tokenized["input_ids"])
+    def set_label2id(self, train_dataset):
 
-        return tokenized
+        labels = train_dataset.unique(self.label_col)
+        labels = sorted(labels)
+
+        self.label2id = {label: i for i, label in enumerate(labels)}
+
+    def get_label2id(self):
+        """
+        Must be called after `set_label2id`
+        """
+        return self.label2id
+
+
+def tokenize(
+    examples,
+    tokenizer,
+    max_length,
+    stride=None,
+    text_col="text",
+    text_pair_col=None,
+    label_col="label",
+):
+    tokenizer_kwargs = {
+        "padding": False,
+    }
+
+    # If stride is not None, using sbert approach
+    if stride is not None and stride > 0:
+        tokenizer_kwargs.update(
+            {
+                "padding": True,
+                "stride": stride,
+                "return_overflowing_tokens": True,
+            }
+        )
+
+    texts = [examples[text_col]]
+    if text_pair_col is not None:
+        texts.append(examples[text_pair_col])
+
+    tokenized = tokenizer(
+        *texts,
+        truncation=True,
+        max_length=max_length,
+        **tokenizer_kwargs,
+    )
+
+    tokenized["labels"] = examples[label_col]
+
+    return tokenized
 
 
 # TODO: Make Default processor
 
 # map dataset name to processor
-name2processor = {
-    "health_fact": HealthFactProcessor,
-    "ccdv/arxiv-classification": ArxivProcessor,
-}
+name2processor = defaultdict(lambda: GenericDatasetProcessor)
+
+name2processor.update(
+    {
+        "health_fact": HealthFactProcessor,
+        "ccdv/arxiv-classification": ArxivProcessor,
+    }
+)

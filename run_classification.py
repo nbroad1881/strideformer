@@ -266,8 +266,6 @@ def get_optimizer_and_scheduler(model, train_dataloader, args):
 def main(cfg: DictConfig) -> None:
 
     train_args = dict(cfg.training_arguments)
-    del cfg.training_arguments
-
     training_args = TrainingArguments(**train_args)
 
     mixed_precision = "no"

@@ -1,0 +1,11 @@
+dataset_name: health_fact
+dataset_config_name: null
+max_seq_length: 512
+truncation: yes
+pad_multiple: 8
+# set to small number for debugging, -1 for all rows
+n_rows: -1  
+text_col: "claim"
+text_pair_col: "main_text"
+label_col: "label"
+map_batch_size: 1000

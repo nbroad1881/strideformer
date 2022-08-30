@@ -10,8 +10,8 @@ defaults:
 
 
 model:
-  model_name_or_path:  "sentence-transformers/all-MiniLM-L12-v2"
-  short_model_max_chunks: 64
+  model_name_or_path:  "google/bigbird-roberta-base"
+  short_model_max_chunks: 128
   hidden_act: gelu
   intermediate_size: 3072
   layer_norm_eps: 1e-7
@@ -20,10 +20,10 @@ model:
 
   
 data:
-  max_seq_length: 384
-  pad_multiple: 8
-  stride: 128
-  n_rows: 1000
+  max_seq_length: 4096
+  pad_multiple: 512
+  stride: 0
+  n_rows: 2000
   dataset_name: 'ccdv/arxiv-classification'
   
 training_arguments:
@@ -34,9 +34,10 @@ training_arguments:
   fp16: yes
   
   learning_rate: 1e-5
-  per_device_train_batch_size: 2
-  per_device_eval_batch_size: 4
+  per_device_train_batch_size: 4
+  per_device_eval_batch_size: 8
   gradient_accumulation_steps: 1
+  group_by_length: yes
   
   metric_for_best_model: "f1_micro"
   greater_is_better: yes
@@ -47,7 +48,10 @@ training_arguments:
   save_total_limit: 2
   
 # general configuration
-num_proc: 7
+num_proc: 2
 task: text-classification
 language: en
 project_name: stride-former
+
+hydra:
+  output_subdir: config

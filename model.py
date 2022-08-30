@@ -29,19 +29,22 @@ class StridedLongformer(PreTrainedModel):
         self.classifier = nn.Linear(config.hidden_size, config.num_labels)
 
     @staticmethod
-    def mean_pooling(output_embeddings, attention_mask):
+    def mean_pooling(output_embeddings, attention_mask=None):
         """
         If batched, there can be pad tokens in the sequence.
         This will ignore padded outputs when doing mean pooling.
         """
 
         token_embeddings = output_embeddings
-        input_mask_expanded = (
-            attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
-        )
-        return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(
-            input_mask_expanded.sum(1), min=1e-9
-        )
+        if attention_mask is not None:
+            input_mask_expanded = (
+                attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+            )
+            return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(
+                input_mask_expanded.sum(1), min=1e-9
+            )
+        
+        return torch.sum(token_embeddings, 1) / torch.clamp(token_embeddings.size(1), min=1e-9)
 
     def forward(
         self,
@@ -53,23 +56,21 @@ class StridedLongformer(PreTrainedModel):
         input_ids will be of shape [num_chunks, sequence_length] where num_chunks should only be for one document
         labels is [num_classes] if multilabel, [1] for multiclass or regression
         """
-
+        
         # short model is frozen, so no gradients needed
         with torch.no_grad():
             short_model_output = self.short_model(
                 input_ids=input_ids[:self.short_model_max_chunks, :],
                 attention_mask=attention_mask[:self.short_model_max_chunks, :],
             )
-            embeddings = self.mean_pooling(
-                short_model_output[0], attention_mask[:self.short_model_max_chunks, :]
-            )
+            embeddings = short_model_output[0].mean(dim=1)
 
         # embeddings will be of shape [num_chunks, hidden_dim]
         transformer_output = self.transformer(
             embeddings, 
         )
 
-        logits = self.mean_pooling(self.classifier(transformer_output), attention_mask)
+        logits = self.classifier(transformer_output).mean(dim=0)
         # logits will be of shape [num_labels]
 
         loss = None
@@ -77,7 +78,7 @@ class StridedLongformer(PreTrainedModel):
             # TODO: Implement multilabel, regression losses
 
             loss_fn = nn.CrossEntropyLoss()
-            loss = loss_fn(logits, labels)
+            loss = loss_fn(logits.unsqueeze(0), labels)
 
         return {"loss": loss, "logits": logits}
 

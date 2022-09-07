@@ -7,6 +7,24 @@ Using short models to classify long texts. Still a work-in-progress, but the gen
 
 Since attention in transformers scales quadratically with sequence length, it can become infeasible to do full self-attention on sequences longer than 512 tokens. Models like [Longformer](https://arxiv.org/abs/2004.05150) and [Big Bird](https://arxiv.org/abs/2007.14062) use different attention mechanisms to reduce the quadratic scaling to linear scaling, allowing them to work on sequences up to 4096 tokens. This approach chunks the text into 512 token chunks and then aggregates those embeddings by putting them through another transformer. Because there are two models involved, the first one is a pre-trained sentence transformer to reduce the number of trainable parameters. The second model is a [generic transformer encoder](https://pytorch.org/docs/stable/generated/torch.nn.TransformerEncoder.html#torch.nn.TransformerEncoder).  This repo is called stride-former because there is an overlap between chunks of text - typically of 256 tokens, which is referred to as a stride. 
 
+## Is it better than Longformer or Bigbird?
+
+In a very small and un-scientific set of experiments on a small subset of one dataset ([arxiv-classification](https://huggingface.co/datasets/ccdv/arxiv-classification)), the stride-former did best. This dataset has extremely long documents: about half of the documents are over 15k tokens and 25% are over 23k. This is far more than the 4096 token limit of Longformer and Bigbird, and much more than the typical 512 token limit of standard full-attention models. See the [Weights and Biases report here.](https://wandb.ai/nbroad/stride-former/reports/Stride-former-comparison--VmlldzoyNTUyOTEy?accessToken=p5x55isxp9thu5ktrhrrlmm98c82ckaagcam3r2re43mye8z45763mudidrb4vml)
+
+The two rows at the bottom of the table below are the stride-former runs which use sentence transformers to encode the chunks. 
+
+|model               |max_seq_length|stride|eval_f1_micro      |eval_f1_macro      |
+|---------------------------------------|-------------------|-----------------|-----------|-------------------|
+|microsoft/deberta-v3-base              |512                |0          |0.2871 |0.16918|
+|microsoft/deberta-v3-base              |512                |0          |0.2475|0.1494|
+|allenai/longformer-base-4096           |4096               |0          |0.6732 |0.6094 |
+|allenai/longformer-base-4096           |4096               |0          |0.6831 |0.6295 |
+|google/bigbird-roberta-base            |4096               |0          |0.5841 |0.5118  |
+|google/bigbird-roberta-base            |4096               |0          |0.6534 |0.6064 |
+|sentence-transformers/all-MiniLM-L12-v2|384                |128        |0.7227 |0.6728 |
+|sentence-transformers/all-MiniLM-L12-v2|384                |128        |0.6831 |0.6386  |
+
+
 ## How many chunks?
 
 If the max sequence length is `L` and the stride is `S`, and the original sequence length without striding is `N`, then here is how to calculate the number of chunks. Chunk 1 will consist of a sequence starting at token `0` and going until, but not including, `L`. Chunk 2 will start at token `L - S` and end at `2L - S`, chunk `C` will end at `CL - (C - 1)S`. How many chunks does it take for an original sequence of `N` tokens? 

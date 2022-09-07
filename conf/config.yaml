@@ -10,7 +10,7 @@ defaults:
 
 
 model:
-  model_name_or_path:  "sentence-transformers/all-MiniLM-L12-v2"
+  model_name_or_path:  "sentence-transformers/all-mpnet-base-v2"
   short_model_max_chunks: 128
   hidden_act: gelu
   intermediate_size: 4096
@@ -20,7 +20,7 @@ model:
 
   
 data:
-  max_seq_length: 384
+  max_seq_length: 256
   pad_multiple: 8
   stride: 128
   n_rows: 2000
@@ -39,14 +39,14 @@ training_arguments:
   evaluation_strategy: "epoch"
   fp16: yes
   
-  learning_rate: 1e-5
-  per_device_train_batch_size: 1
-  per_device_eval_batch_size: 1
+  learning_rate: 7e-6
+  per_device_train_batch_size: 2
+  per_device_eval_batch_size: 16
   gradient_accumulation_steps: 1
   
   metric_for_best_model: "f1_micro"
   greater_is_better: yes
-  report_to: "wandb"
+  report_to: "mlflow"
   log_level: "warning"
   save_strategy: "epoch"
   logging_steps: 10

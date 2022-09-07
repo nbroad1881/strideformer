@@ -112,10 +112,13 @@ def training_loop(accelerator, model, optimizer, lr_scheduler, dataloaders, args
                     "train_loss": epoch_loss.item() / example_count,
                     "step": completed_steps,
                 }
-                accelerator.log(
-                    details,
-                    step=completed_steps,
-                )
+
+                if args.report_to is not None:
+                    accelerator.log(
+                        details,
+                        step=completed_steps,
+                    )
+
                 logging.info(details)
                 progress_bar.set_description(
                     f"Training: Epoch {epoch} | Loss {details['train_loss']} | Step {details['step']}"
@@ -139,8 +142,9 @@ def training_loop(accelerator, model, optimizer, lr_scheduler, dataloaders, args
                     "step": completed_steps,
                 }
             )
-
-            accelerator.log(eval_metrics, step=completed_steps)
+            
+            if args.report_to is not None:
+                accelerator.log(eval_metrics, step=completed_steps)
             logging.info(eval_metrics)
 
         if completed_steps >= args.max_steps:
@@ -299,6 +303,10 @@ def main(cfg: DictConfig) -> None:
             description=cfg.mlflow.description,
         )
         log_with.append(mlflow_tracker)
+    
+    if log_with == "none":
+        log_with = None
+        training_args.report_to = None
 
     # TODO: add logging with mlflow
     accelerator = Accelerator(mixed_precision=mixed_precision, log_with=log_with)
@@ -452,7 +460,7 @@ def main(cfg: DictConfig) -> None:
     # We need to initialize the trackers we use, and also store our configuration.
     # We initialize the trackers only on main process because `accelerator.log`
     # only logs on main process and we don't want empty logs/runs on other processes.
-    if training_args.report_to:
+    if training_args.report_to is not None:
         if accelerator.is_main_process:
             experiment_config = OmegaConf.to_container(cfg)
 
@@ -483,7 +491,8 @@ def main(cfg: DictConfig) -> None:
             prefix="test",
         )
 
-        accelerator.log(test_metrics, step=completed_steps)
+        if training_args.report_to is not None:
+            accelerator.log(test_metrics, step=completed_steps)
 
         logging.info(test_metrics)
 

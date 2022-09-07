@@ -40,6 +40,7 @@ from transformers import (
 )
 from transformers.trainer_pt_utils import IterableDatasetShard
 from transformers.training_args import trainer_log_levels
+from transformers.utils import flatten_dict
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 
@@ -456,10 +457,12 @@ def main(cfg: DictConfig) -> None:
             experiment_config = OmegaConf.to_container(cfg)
 
             if "mlflow" in training_args.report_to:
-                mlflow_tracker.save_training_args(training_args)
-                del experiment_config["training_arguments"]
+                training_args = mlflow_tracker.save_training_args(training_args)
+                experiment_config["training_arguments"] = training_args
                 
-            accelerator.init_trackers(cfg.project_name, experiment_config)
+            experiment_config.update(model.config.to_diff_dict())
+                
+            accelerator.init_trackers(cfg.project_name, flatten_dict(experiment_config))
             
 
     completed_steps = training_loop(

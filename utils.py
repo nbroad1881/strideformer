@@ -5,6 +5,7 @@ from typing import Optional, Any, Union, Dict
 
 
 import torch
+from omegaconf import OmegaConf
 from transformers import TrainingArguments
 
 from accelerate.tracking import GeneralTracker
@@ -34,12 +35,11 @@ def set_mlflow_env_vars(cfg):
     The environment variables can be picked up by mlflow in Trainer.
     """
 
-    os.environ["HF_MLFLOW_LOG_ARTIFACTS"] = str(cfg.mlflow.log_artifact)
-    os.environ["MLFLOW_NESTED_RUN"] = str(cfg.mlflow.nested_run)
-    os.environ["MLFLOW_EXPERIMENT_NAME"] = cfg.mlflow.experiment_name
-    os.environ["MLFLOW_FLATTEN_PARAMS"] = str(cfg.mlflow.flatten_params)
-    os.environ["MLFLOW_RUN_ID"] = str(cfg.mlflow.run_id)
-    os.environ["MLFLOW_TAGS"] = json.dumps(cfg.mlflow.tags)
+    os.environ["MLFLOW_NESTED_RUN"] = cfg.mlflow.nested_run or ""
+    os.environ["MLFLOW_EXPERIMENT_NAME"] = cfg.mlflow.experiment_name or ""
+    os.environ["MLFLOW_FLATTEN_PARAMS"] = cfg.mlflow.flatten_params or ""
+    os.environ["MLFLOW_RUN_ID"] = cfg.mlflow.run_id or ""
+    os.environ["MLFLOW_TAGS"] = json.dumps(OmegaConf.to_container(cfg.mlflow.tags))
 
 
 def reinit_modules(modules, std, reinit_embeddings=False):
@@ -165,11 +165,18 @@ class MLflowTracker(GeneralTracker):
         if mlflow.active_run() and not nested_run:
             raise ValueError("Detected active run. `nested_run` must be set to True.")
 
-        experiment_id = mlflow.create_experiment(
-            name=experiment_name,
-            artifact_location=logging_dir,
-            tags=tags,
-        )
+        if mlflow.get_experiment_by_name(experiment_name):
+            experiment_id = mlflow.set_experiment(
+                experiment_name,
+            ).experiment_id
+            mlflow.set_experiment_tags(tags)
+        
+        else:
+            experiment_id = mlflow.create_experiment(
+                name=experiment_name,
+                artifact_location=logging_dir,
+                tags=tags,
+            )
 
         self.active_run = mlflow.start_run(
             run_id=run_id,
@@ -222,7 +229,7 @@ class MLflowTracker(GeneralTracker):
             # internally, all values are converted to str in MLflow
             if len(str(value)) > self._MAX_PARAM_VAL_LENGTH:
                 logger.warning(
-                    f'Trainer is attempting to log a value of "{value}" for key "{name}" as a parameter. MLflow\'s'
+                    f'Attempting to log a value of "{value}" for key "{name}" as a parameter. MLflow\'s'
                     f" log_param() only accepts values shorter than {self._MAX_PARAM_VAL_LENGTH} characters so we dropped this attribute."
                 )
                 del values[name]

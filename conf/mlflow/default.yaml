@@ -7,3 +7,6 @@ nested_run: "FALSE"
 run_id: null
 flatten_params: "FALSE"
 tracking_uri: null
+logging_dir: null
+run_name: null
+description: null

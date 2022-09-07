@@ -43,12 +43,17 @@ from transformers.training_args import trainer_log_levels
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 
-from utils import set_wandb_env_vars, set_mlflow_env_vars
+from utils import (
+    MLflowTracker,
+    set_wandb_env_vars,
+    set_mlflow_env_vars,
+)
 from model import StridedLongformer
 from data import DataModule, StridedLongformerCollator
 
 
 logger = get_logger(__name__)
+
 
 def training_loop(accelerator, model, optimizer, lr_scheduler, dataloaders, args):
 
@@ -76,7 +81,7 @@ def training_loop(accelerator, model, optimizer, lr_scheduler, dataloaders, args
 
             # We keep track of the loss at each epoch
             if args.report_to is not None:
-                epoch_loss += loss.detach().float()*batch["labels"].numel()
+                epoch_loss += loss.detach().float() * batch["labels"].numel()
 
             loss = loss / args.gradient_accumulation_steps
             accelerator.backward(loss)
@@ -98,7 +103,10 @@ def training_loop(accelerator, model, optimizer, lr_scheduler, dataloaders, args
                         output_dir = os.path.join(args.output_dir, output_dir)
                     accelerator.save_state(output_dir)
 
-            if args.logging_strategy == "steps" and (step + 1) % args.logging_steps == 0:
+            if (
+                args.logging_strategy == "steps"
+                and (step + 1) % args.logging_steps == 0
+            ):
                 details = {
                     "train_loss": epoch_loss.item() / example_count,
                     "step": completed_steps,
@@ -172,7 +180,7 @@ def eval_loop(accelerator, model, dataloader, prefix):
 
         y_preds.append(preds)
         y_true.append(labels)
-        
+
         progress_bar.update(1)
 
     if isinstance(y_preds[0], list):
@@ -274,15 +282,25 @@ def main(cfg: DictConfig) -> None:
     if training_args.bf16:
         mixed_precision = "bf16"
 
-    # TODO: add logging with mlflow
-    accelerator = Accelerator(
-        mixed_precision=mixed_precision, log_with=training_args.report_to
-    )
-
+    log_with = training_args.report_to
     if "wandb" in training_args.report_to:
         set_wandb_env_vars(cfg)
     if "mlflow" in training_args.report_to:
         set_mlflow_env_vars(cfg)
+        log_with.remove("mlflow")
+        mlflow_tracker = MLflowTracker(
+            experiment_name=cfg.mlflow.experiment_name,
+            logging_dir=cfg.mlflow.logging_dir or cfg.training_arguments.output_dir,
+            run_id=cfg.mlflow.run_id,
+            tags=cfg.mlflow.tags,
+            nested_run=cfg.mlflow.nested_run,
+            run_name=cfg.mlflow.run_name,
+            description=cfg.mlflow.description,
+        )
+        log_with.append(mlflow_tracker)
+
+    # TODO: add logging with mlflow
+    accelerator = Accelerator(mixed_precision=mixed_precision, log_with=log_with)
 
     # Make one log on every process with the configuration for debugging.
     logging.basicConfig(
@@ -291,10 +309,10 @@ def main(cfg: DictConfig) -> None:
         level=training_args.log_level,
     )
     logger.info(accelerator.state, main_process_only=False)
-    
+
     if training_args.log_level != -1:
         logger.setLevel(training_args.log_level)
-    
+
     if accelerator.is_local_main_process:
         if training_args.log_level == -1:
             datasets.utils.logging.set_verbosity_warning()
@@ -325,15 +343,22 @@ def main(cfg: DictConfig) -> None:
 
     if cfg.data.stride is not None and cfg.data.stride > 0:
         collator = StridedLongformerCollator(tokenizer=data_module.tokenizer)
-        
+
         # batch_sizes must always be 1 when using strided approach
-        if training_args.per_device_train_batch_size != 1 or training_args.per_device_eval_batch_size != 1:
-            logger.warning("Batch size must be 1 when using strided approach. Changing to 1 now.")
+        if (
+            training_args.per_device_train_batch_size != 1
+            or training_args.per_device_eval_batch_size != 1
+        ):
+            logger.warning(
+                "Batch size must be 1 when using strided approach. Changing to 1 now."
+            )
         training_args.per_device_train_batch_size = 1
         training_args.per_device_eval_batch_size = 1
 
     else:
-        collator = DataCollatorWithPadding(tokenizer=data_module.tokenizer, pad_to_multiple_of=cfg.data.pad_multiple)
+        collator = DataCollatorWithPadding(
+            tokenizer=data_module.tokenizer, pad_to_multiple_of=cfg.data.pad_multiple
+        )
 
     dataloaders = {}
 
@@ -372,12 +397,12 @@ def main(cfg: DictConfig) -> None:
         label2id=data_module.label2id,
         id2label=data_module.id2label,
     )
-    
+
     if cfg.data.stride is not None and cfg.data.stride > 0:
         model_config.update(
             {
                 "short_model": cfg.model.model_name_or_path,
-                "short_model_max_chunks": cfg.model.short_model_max_chunks, # maximum number of chunks to break the document into
+                "short_model_max_chunks": cfg.model.short_model_max_chunks,  # maximum number of chunks to break the document into
                 "hidden_act": cfg.model.hidden_act,
                 "intermediate_size": cfg.model.intermediate_size,
                 "layer_norm_eps": cfg.model.layer_norm_eps,
@@ -411,16 +436,17 @@ def main(cfg: DictConfig) -> None:
     if training_args.do_predict:
         items2prepare.append(dataloaders["test"])
 
-    model, optimizer, lr_scheduler, *dataloaders_list = accelerator.prepare(*items2prepare)
-    
+    model, optimizer, lr_scheduler, *dataloaders_list = accelerator.prepare(
+        *items2prepare
+    )
+
     dataloaders["train"] = dataloaders_list.pop(0)
-    
+
     if training_args.do_eval:
         dataloaders["validation"] = dataloaders_list.pop(0)
-    
+
     if training_args.do_predict:
         dataloaders["test"] = dataloaders_list.pop(0)
-    
 
     # We need to initialize the trackers we use, and also store our configuration.
     # We initialize the trackers only on main process because `accelerator.log`
@@ -429,7 +455,12 @@ def main(cfg: DictConfig) -> None:
         if accelerator.is_main_process:
             experiment_config = OmegaConf.to_container(cfg)
 
+            if "mlflow" in training_args.report_to:
+                mlflow_tracker.save_training_args(training_args)
+                del experiment_config["training_arguments"]
+                
             accelerator.init_trackers(cfg.project_name, experiment_config)
+            
 
     completed_steps = training_loop(
         accelerator,

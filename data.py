@@ -76,7 +76,7 @@ class DataModule:
         return self.raw_dataset["test"]
 
 
-class StridedLongformerCollator:
+class StrideformerCollator:
     def __init__(self, tokenizer):
         self.tokenizer = tokenizer
 

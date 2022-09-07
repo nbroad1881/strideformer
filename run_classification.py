@@ -49,8 +49,8 @@ from utils import (
     set_wandb_env_vars,
     set_mlflow_env_vars,
 )
-from model import StridedLongformer
-from data import DataModule, StridedLongformerCollator
+from model import Strideformer
+from data import DataModule, StrideformerCollator
 
 
 logger = get_logger(__name__)
@@ -343,7 +343,7 @@ def main(cfg: DictConfig) -> None:
         data_module.prepare_dataset()
 
     if cfg.data.stride is not None and cfg.data.stride > 0:
-        collator = StridedLongformerCollator(tokenizer=data_module.tokenizer)
+        collator = StrideformerCollator(tokenizer=data_module.tokenizer)
 
         # batch_sizes must always be 1 when using strided approach
         if (
@@ -412,7 +412,7 @@ def main(cfg: DictConfig) -> None:
             }
         )
 
-        model = StridedLongformer.from_pretrained(
+        model = Strideformer.from_pretrained(
             cfg.model.model_name_or_path, config=model_config
         )
     else:

@@ -7,7 +7,7 @@ from transformers import PreTrainedModel, AutoModel, AutoConfig
 from utils import reinit_modules
 
 
-class StridedLongformer(PreTrainedModel):
+class Strideformer(PreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.config = config
@@ -87,7 +87,7 @@ class StridedLongformer(PreTrainedModel):
         model_name_or_path = Path(model_name_or_path)
         if config is None:
             config = AutoConfig.from_pretrained(model_name_or_path)
-        model = StridedLongformer(config)
+        model = Strideformer(config)
 
         if model_name_or_path.is_dir():
             model.load_state_dict(torch.load(model_name_or_path / "pytorch_model.bin"))

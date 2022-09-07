@@ -9,7 +9,7 @@ Since attention in transformers scales quadratically with sequence length, it ca
 
 ## Is it better than Longformer or Bigbird?
 
-In a very small and un-scientific set of experiments on a small subset of one dataset ([arxiv-classification](https://huggingface.co/datasets/ccdv/arxiv-classification)), the stride-former did best. This dataset has extremely long documents: about half of the documents are over 15k tokens and 25% are over 23k. This is far more than the 4096 token limit of Longformer and Bigbird, and much more than the typical 512 token limit of standard full-attention models. See the [Weights and Biases report here.](https://wandb.ai/nbroad/stride-former/reports/Stride-former-comparison--VmlldzoyNTUyOTEy?accessToken=p5x55isxp9thu5ktrhrrlmm98c82ckaagcam3r2re43mye8z45763mudidrb4vml)
+In a very small and un-scientific set of experiments on a small subset of one dataset ([arxiv-classification](https://huggingface.co/datasets/ccdv/arxiv-classification)), the stride-former did best. This dataset has extremely long documents: about half of the documents are over 15k tokens and 25% are over 23k. This is far more than the 4096 token limit of Longformer and Bigbird, and much more than the typical 512 token limit of standard full-attention models. The current default parameters for the stride-former are: chunks of 384 tokens, stride by 128 tokens, and limit the total number of chunks to 128, which means that documents with 32k tokens can be passed through.  
 
 The two rows at the bottom of the table below are the stride-former runs which use sentence transformers to encode the chunks. 
 
@@ -24,6 +24,8 @@ The two rows at the bottom of the table below are the stride-former runs which u
 |sentence-transformers/all-MiniLM-L12-v2|384                |128        |0.7227 |0.6728 |
 |sentence-transformers/all-MiniLM-L12-v2|384                |128        |0.6831 |0.6386  |
 
+
+See the [Weights and Biases report here for more details.](https://wandb.ai/nbroad/stride-former/reports/Stride-former-comparison--VmlldzoyNTUyOTEy?accessToken=p5x55isxp9thu5ktrhrrlmm98c82ckaagcam3r2re43mye8z45763mudidrb4vml)
 
 ## How many chunks?
 

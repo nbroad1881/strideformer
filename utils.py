@@ -42,24 +42,6 @@ def set_mlflow_env_vars(cfg):
     os.environ["MLFLOW_TAGS"] = json.dumps(OmegaConf.to_container(cfg.mlflow.tags))
 
 
-def reinit_modules(modules, std, reinit_embeddings=False):
-    """
-    Reinitializes every Linear, Embedding, and LayerNorm module provided.
-    """
-    for module in modules:
-        if isinstance(module, torch.nn.Linear):
-            module.weight.data.normal_(mean=0.0, std=std)
-            if module.bias is not None:
-                module.bias.data.zero_()
-        elif reinit_embeddings and isinstance(module, torch.nn.Embedding):
-            module.weight.data.normal_(mean=0.0, std=std)
-            if module.padding_idx is not None:
-                module.weight.data[module.padding_idx].zero_()
-        elif isinstance(module, torch.nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
-
-
 training_args_to_log = {
     "per_device_train_batch_size",
     "per_device_eval_batch_size",

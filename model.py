@@ -4,15 +4,13 @@ import torch
 from torch import nn
 from transformers import PreTrainedModel, AutoModel, AutoConfig
 
-from utils import reinit_modules
-
 
 class Strideformer(PreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.config = config
 
-        self.short = AutoModel.from_pretrained(config.short_model)
+        self.short_model = AutoModel.from_pretrained(config.short_model)
         self.short_model_max_chunks = config.short_model_max_chunks
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=config.hidden_size,
@@ -99,3 +97,21 @@ class Strideformer(PreTrainedModel):
         reinit_modules(model.classifier.modules(), std=config.initializer_range)
 
         return model
+
+    
+def reinit_modules(modules, std, reinit_embeddings=False):
+    """
+    Reinitializes every Linear, Embedding, and LayerNorm module provided.
+    """
+    for module in modules:
+        if isinstance(module, torch.nn.Linear):
+            module.weight.data.normal_(mean=0.0, std=std)
+            if module.bias is not None:
+                module.bias.data.zero_()
+        elif reinit_embeddings and isinstance(module, torch.nn.Embedding):
+            module.weight.data.normal_(mean=0.0, std=std)
+            if module.padding_idx is not None:
+                module.weight.data[module.padding_idx].zero_()
+        elif isinstance(module, torch.nn.LayerNorm):
+            module.bias.data.zero_()
+            module.weight.data.fill_(1.0)

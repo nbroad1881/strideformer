@@ -93,25 +93,25 @@ class Strideformer(PreTrainedModel):
 
         model.short_model = AutoModel.from_pretrained(model_name_or_path)
 
-        reinit_modules(model.transformer.modules(), std=config.initializer_range)
-        reinit_modules(model.classifier.modules(), std=config.initializer_range)
+        cls._init_weights(model.transformer.modules(), std=config.initializer_range)
+        cls._init_weights(model.classifier.modules(), std=config.initializer_range)
 
         return model
 
-    
-def reinit_modules(modules, std, reinit_embeddings=False):
-    """
-    Reinitializes every Linear, Embedding, and LayerNorm module provided.
-    """
-    for module in modules:
-        if isinstance(module, torch.nn.Linear):
-            module.weight.data.normal_(mean=0.0, std=std)
-            if module.bias is not None:
+    @staticmethod
+    def _init_weights(self, modules, std):
+        """
+        Reinitializes every Linear, Embedding, and LayerNorm module provided.
+        """
+        for module in modules:
+            if isinstance(module, torch.nn.Linear):
+                module.weight.data.normal_(mean=0.0, std=std)
+                if module.bias is not None:
+                    module.bias.data.zero_()
+            elif isinstance(module, torch.nn.Embedding):
+                module.weight.data.normal_(mean=0.0, std=std)
+                if module.padding_idx is not None:
+                    module.weight.data[module.padding_idx].zero_()
+            elif isinstance(module, torch.nn.LayerNorm):
                 module.bias.data.zero_()
-        elif reinit_embeddings and isinstance(module, torch.nn.Embedding):
-            module.weight.data.normal_(mean=0.0, std=std)
-            if module.padding_idx is not None:
-                module.weight.data[module.padding_idx].zero_()
-        elif isinstance(module, torch.nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
+                module.weight.data.fill_(1.0)

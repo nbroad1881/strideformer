@@ -69,7 +69,7 @@ class Strideformer(PreTrainedModel):
         attention_mask: Optional[torch.FloatTensor] = None,
     ) -> torch.FloatTensor:
         """
-        Mean pool across the 1st dimension. Assumes that output 
+        Mean pool across the `sequence_length` dimension. Assumes that output 
         embeddings have shape `(batch_size, sequence_length, hidden_size)`.
         If batched, there can be pad tokens in the sequence.
         This will ignore padded outputs when doing mean pooling by using
@@ -96,6 +96,7 @@ class Strideformer(PreTrainedModel):
                 input_mask_expanded.sum(1), min=1e-9
             )
 
+        # this might be wrong
         return torch.sum(token_embeddings, 1) / torch.clamp(
             token_embeddings.sum(1), min=1e-9
         )
@@ -155,10 +156,6 @@ class Strideformer(PreTrainedModel):
 
         # mean pool last hidden state 
         embeddings = self.mean_pooling(first_model_hidden_states, attention_mask=attention_mask)
-
-        # embeddings will be of shape [num_chunks, hidden_size]
-        if len(embeddings.shape) != 3:
-            embeddings = embeddings.unsqueeze(0)
 
         second_model_hidden_states = self.second_model(
             embeddings.reshape(batch_size, -1, self.config.hidden_size),

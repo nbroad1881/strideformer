@@ -49,7 +49,7 @@ from utils import (
     set_wandb_env_vars,
     set_mlflow_env_vars,
 )
-from model import Strideformer
+from strideformer import Strideformer, StrideformerConfig
 from data import DataModule, StrideformerCollator
 
 

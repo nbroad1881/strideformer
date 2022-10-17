@@ -5,13 +5,13 @@ from typing import Optional, Tuple, Union, Iterator
 
 import torch
 from torch import nn
-from transformers import PreTrainedModel, AutoModel
-from transformers.modeling_outputs import BaseModelOutput
+from transformers import PreTrainedModel, AutoModel, AutoConfig
+from transformers.modeling_outputs import ModelOutput
 
 from .config import StrideformerConfig
 
 
-class StrideformerOutput(BaseModelOutput):
+class StrideformerOutput(ModelOutput):
     """
     Base class for outputs of Strideformer model.
     Args:
@@ -44,7 +44,8 @@ class Strideformer(PreTrainedModel):
         super().__init__(config)
         self.config = config
 
-        self.first_model = AutoModel.from_config(config.first_model_name_or_path)
+        self.first_model_config = AutoConfig.from_pretrained(config.first_model_name_or_path)
+        self.first_model = AutoModel.from_config(self.first_model_config)
         self.max_chunks = config.max_chunks
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=config.hidden_size,
@@ -96,7 +97,7 @@ class Strideformer(PreTrainedModel):
             )
 
         return torch.sum(token_embeddings, 1) / torch.clamp(
-            token_embeddings.size(1), min=1e-9
+            token_embeddings.sum(1), min=1e-9
         )
 
     def forward(
@@ -142,17 +143,18 @@ class Strideformer(PreTrainedModel):
         if self.config.freeze_first_model:
             # No gradients, no training, save memory
             with torch.no_grad():
-                first_model_hidden_states = self.short_model(
+                first_model_hidden_states = self.first_model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
-                )
+                )[0]
         else:
-            first_model_hidden_states = self.short_model(
+            first_model_hidden_states = self.first_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
-            )
+            )[0]
 
-        embeddings = self.mean_pooling(first_model_hidden_states, attention_mask=None)
+        # mean pool last hidden state 
+        embeddings = self.mean_pooling(first_model_hidden_states, attention_mask=attention_mask)
 
         # embeddings will be of shape [num_chunks, hidden_size]
         if len(embeddings.shape) != 3:

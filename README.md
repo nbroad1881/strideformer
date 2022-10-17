@@ -38,9 +38,47 @@ C*(L - S) > N - S
 C > (N - S)/(L - S)
 ```
 
+## Installation
+
+```sh
+pip install strideformer
+```
+
+## Basic usage
+
+```python
+from strideformer import StrideformerConfig, Strideformer
+
+cfg = StrideformerConfig()
+model = Strideformer.from_pretrained("sentence-transformers/all-MiniLM-L6-v2", config=cfg)
+
+# Set the max_length and stride to whatever values you like (256, 128 are good starting points)
+inputs = tokenizer(
+    ["Here is a bunch of text that should be strided over"],
+     return_tensors="pt",
+     return_overflowing_tokens=True,
+     padding=True,
+     truncation=True,
+     max_length=5,
+     stride=2
+     ) 
+
+print(inputs.input_ids.shape)
+# torch.Size([10, 5])
+
+outputs = model(input_ids=inputs.input_ids, attention_mask=inputs.attention_mask)
+print(outputs)
+# StrideformerOutput([('loss', None),
+#                    ('logits',
+#                     tensor([[ 0.4127, -0.2096]], grad_fn=<MeanBackward1>)),
+#                    ('first_model_hidden_states', None),
+#                    ('second_model_hidden_states', None)])
+```
+
+
 ## Basic run
 
-Start by installing the required packages using `pip install -r requirements.txt`. Some additional packages might also be necessary depending on the tracking framework and models chosen (see [here](#optional-packages)). Then change the values inside `conf/config.yaml` to your desired parameters. If you set `data.stride` to 0 or null, then it will just run normally.  
+Start by installing the required packages in the examples folder using `pip install -r requirements.txt`. Some additional packages might also be necessary depending on the tracking framework and models chosen (see [here](#optional-packages)). Then change the values inside `conf/config.yaml` to your desired parameters. If you set `data.stride` to 0 or null, then it will just run normally.  
 
 ```sh
 python run_classification.py

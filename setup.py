@@ -27,13 +27,13 @@ EXTRAS_REQUIRE["dev"] = combine_requirements([k for k in EXTRAS_REQUIRE])
 
 setup(
     name="strideformer",
-    version="0.1.1",
+    version="0.1.2",
     description="Package to use a two-stage transformer for long-document classification",
     long_description=LONG_DESCRIPTION,
     author="Nicholas Broad",
     author_email="nicholas@huggingface.co",
-    url="",
-    download_url="",
+    url="https://github.com/nbroad1881/strideformer",
+    download_url="https://github.com/nbroad1881/strideformer",
     license="Apache 2.0",
     package_dir={"": "src"},
     packages=find_packages("src"),

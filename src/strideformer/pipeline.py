@@ -1,20 +1,25 @@
 import torch
 from transformers import AutoTokenizer
 
-from .model import Strideformer
+from .model import Strideformer, StrideformerConfig
+
 
 class Pipeline:
-
-    def __init__(self, model_name_or_path=None, model=None, tokenizer=None, device=None):
+    def __init__(
+        self, model_name_or_path=None, model=None, tokenizer=None, device=None
+    ):
         if model_name_or_path is not None:
-            self.model = Strideformer.from_pretrained(model_name_or_path)
+            config = StrideformerConfig.from_pretrained(model_name_or_path)
+            self.model = Strideformer.from_pretrained(model_name_or_path, config=config)
             self.tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
         else:
             self.model = model
             self.tokenizer = tokenizer
-        
+
         self.model.eval()
-        self.device = torch.device(device) if device is not None else torch.device("cpu")
+        self.device = (
+            torch.device(device) if device is not None else torch.device("cpu")
+        )
         self.model.to(self.device)
 
     def __call__(self, text, max_length=384, stride=128, return_type="list"):
@@ -29,13 +34,13 @@ class Pipeline:
             truncation=True,
         )
 
+        del tokens["overflow_to_sample_mapping"]
+
         output = self.model(**tokens.to(self.device))
 
         if return_type == "np":
             return output.logits.detach().cpu().numpy()
         elif return_type == "list":
             return output.logits.detach().cpu().tolist()
-            
-        return output.logits.detach().cpu()
 
-        
+        return output.logits.detach().cpu()

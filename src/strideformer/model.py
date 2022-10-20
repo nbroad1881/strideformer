@@ -131,7 +131,7 @@ class Strideformer(PreTrainedModel):
                 This gets reshaped to `(batch_size, chunks_per_batch, hidden_size)`. This means that
                 all document sequences must be tokenized to the same number of chunks.
         Returns:
-            A `tuple of `torch.Tensor` if `return_dict` is `False`. 
+            A `tuple` of `torch.Tensor` if `return_dict` is `False`. 
             A `StrideformerOutput` object if `return_dict` is None or True.
             These containers hold values for loss, logits, and last hidden states for 
             both models.

@@ -103,20 +103,24 @@ class Strideformer(PreTrainedModel):
 
     def forward(
         self,
-        input_ids: Optional[torch.FloatTensor] = None,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        labels: Optional[torch.FloatTensor] = None,
+        input_ids: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        token_type_ids: Optional[torch.Tensor] = None,
+        labels: Optional[torch.Tensor] = None,
         batch_size: Optional[int] = 1,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple[torch.Tensor], StrideformerOutput]:
         """
         Args:
-            input_ids (`torch.LongTensor`, *optional*, defaults to None):
+            input_ids (`torch.Tensor`, *optional*, defaults to None):
                 Indices of input sequence tokens in the vocabulary. These can be created
                 using the corresponding tokenizer for the first model.
                 Shape is `(num_chunks, sequence_length)` where `num_chunks` is `(batch_size*chunks_per_batch)`.
-            labels (`torch.FloatTensor` or `torch.LongTensor`, *optional*, defaults to None):
+            token_type_ids (`torch.Tensor`, *optional*, defaults to None):
+                Some models take token_type_ids. This comes from the tokenizer and gets
+                passed to the first model.
+            labels (`torch.FloatTensor` or `torch.Tensor`, *optional*, defaults to None):
                 The true values. Used for loss calculation.
                 Shape is `(batch_size, num_classes)` if multilabel,
                 `(batch_size, 1)` for multiclass or regression.
@@ -134,12 +138,7 @@ class Strideformer(PreTrainedModel):
         """
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        assert (
-            input_ids.size(0) < self.max_chunks
-        ), f"Input ids greater than max_chunks {input_ids.size(0)}"
-        assert (
-            attention_mask.size(0) < self.max_chunks
-        ), f"Attention mask greater than max_chunks {attention_mask.size(0)}"
+        token_type_ids = {"token_type_ids": token_type_ids} if token_type_ids is not None else {}
 
         if self.config.freeze_first_model:
             # No gradients, no training, save memory
@@ -147,11 +146,13 @@ class Strideformer(PreTrainedModel):
                 first_model_hidden_states = self.first_model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
+                    **token_type_ids,
                 )[0]
         else:
             first_model_hidden_states = self.first_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
+                **token_type_ids,
             )[0]
 
         # mean pool last hidden state 
@@ -209,34 +210,6 @@ class Strideformer(PreTrainedModel):
             first_model_hidden_states=first_model_hidden_states,
             second_model_hidden_states=second_model_hidden_states,
         )
-
-    @classmethod
-    def from_pretrained(
-        cls,
-        model_name_or_path: Optional[Union[str, os.PathLike]],
-        config: StrideformerConfig = None,
-        **kwargs,
-    ) -> None:
-        """
-        Firsts check for a local weights path. If found, loads and
-        returns the model.
-        Otherwise, will load first model from Hub and randomly
-        initialize second model.
-        """
-        if config is None:
-            config = StrideformerConfig()
-        model = Strideformer(config)
-
-        weights_path = Path(model_name_or_path)
-        if weights_path.is_dir():
-            weights_path = weights_path / "pytorch_model.bin"
-        if weights_path.exists():
-            model.load_state_dict(torch.load(weights_path))
-            return model
-
-        model.first_model = AutoModel.from_pretrained(model_name_or_path)
-
-        return model
 
     @staticmethod
     def _init_weights(modules: Iterator[nn.Module], std: float = 0.02) -> None:

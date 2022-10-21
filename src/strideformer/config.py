@@ -48,7 +48,7 @@ class StrideformerConfig(PretrainedConfig):
     >>> model = Strideformer(config)
     ```"""
     model_type: str = "strideformer"
-    keys_to_ignore_at_inference: List = []
+    keys_to_ignore_at_inference: List = ["first_model_hidden_states", "second_model_hidden_states"]
 
     def __init__(
         self,

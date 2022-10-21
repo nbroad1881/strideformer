@@ -21,7 +21,7 @@ class StrideformerCollator:
         self.tokenizer = tokenizer
         self.max_chunks = max_chunks
 
-    def __call__(self, features:List[Dict]):
+    def __call__(self, features: List[Dict]):
         """
         Put features in a format that the model can use.
 

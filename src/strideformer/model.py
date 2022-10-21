@@ -44,7 +44,9 @@ class Strideformer(PreTrainedModel):
         super().__init__(config)
         self.config = config
 
-        self.first_model_config = AutoConfig.from_pretrained(config.first_model_name_or_path)
+        self.first_model_config = AutoConfig.from_pretrained(
+            config.first_model_name_or_path
+        )
         self.first_model = AutoModel.from_config(self.first_model_config)
         self.max_chunks = config.max_chunks
         encoder_layer = nn.TransformerEncoderLayer(
@@ -69,7 +71,7 @@ class Strideformer(PreTrainedModel):
         attention_mask: Optional[torch.FloatTensor] = None,
     ) -> torch.FloatTensor:
         """
-        Mean pool across the `sequence_length` dimension. Assumes that output 
+        Mean pool across the `sequence_length` dimension. Assumes that output
         embeddings have shape `(batch_size, sequence_length, hidden_size)`.
         If batched, there can be pad tokens in the sequence.
         This will ignore padded outputs when doing mean pooling by using
@@ -79,11 +81,11 @@ class Strideformer(PreTrainedModel):
             output_embeddings (`torch.FloatTensor`):
                 Embeddings to be averaged across the first dimension.
             attention_mask (`torch.LongTensor`):
-                Attention mask for the embeddings. Used to ignore 
+                Attention mask for the embeddings. Used to ignore
                 padd tokens from the averaging.
 
         Returns:
-            `torch.FloatTensor`of shape `(batch_size, hidden_size)` that is 
+            `torch.FloatTensor`of shape `(batch_size, hidden_size)` that is
             `output_embeddings` averaged across the 1st dimension.
         """
 
@@ -131,14 +133,18 @@ class Strideformer(PreTrainedModel):
                 This gets reshaped to `(batch_size, chunks_per_batch, hidden_size)`. This means that
                 all document sequences must be tokenized to the same number of chunks.
         Returns:
-            A `tuple of `torch.Tensor` if `return_dict` is `False`. 
+            A `tuple of `torch.Tensor` if `return_dict` is `False`.
             A `StrideformerOutput` object if `return_dict` is None or True.
-            These containers hold values for loss, logits, and last hidden states for 
+            These containers hold values for loss, logits, and last hidden states for
             both models.
         """
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
-        token_type_ids = {"token_type_ids": token_type_ids} if token_type_ids is not None else {}
+        token_type_ids = (
+            {"token_type_ids": token_type_ids} if token_type_ids is not None else {}
+        )
 
         if self.config.freeze_first_model:
             # No gradients, no training, save memory
@@ -155,8 +161,10 @@ class Strideformer(PreTrainedModel):
                 **token_type_ids,
             )[0]
 
-        # mean pool last hidden state 
-        embeddings = self.mean_pooling(first_model_hidden_states, attention_mask=attention_mask)
+        # mean pool last hidden state
+        embeddings = self.mean_pooling(
+            first_model_hidden_states, attention_mask=attention_mask
+        )
 
         second_model_hidden_states = self.second_model(
             embeddings.reshape(batch_size, -1, self.config.hidden_size),
@@ -219,7 +227,7 @@ class Strideformer(PreTrainedModel):
             modules (Iterator of `torch.nn.Module`)
                 Iterator of modules to be initialized. Typically by calling Module.modules()
             std (`float`, *optional*, defaults to 0.02)
-                Standard deviation for normally distributed weight initialization 
+                Standard deviation for normally distributed weight initialization
         """
         for module in modules:
             if isinstance(module, torch.nn.Linear):

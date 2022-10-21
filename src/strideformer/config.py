@@ -36,7 +36,7 @@ class StrideformerConfig(PretrainedConfig):
             `"relu"`, `"silu"` and `"gelu_new"` are supported.
         dropout (`float`, *optional*, defaults to 0.1):
             The dropout probability for all fully connected layers in the second model.
-        layer_norm_eps (`float`, *optional*, defaults to 1e-7): 
+        layer_norm_eps (`float`, *optional*, defaults to 1e-7):
             The epsilon value in LayerNorm
         num_labels (`int`, *optional*, defaults to 2):
             The number of labels for the classifier.
@@ -48,11 +48,16 @@ class StrideformerConfig(PretrainedConfig):
     >>> model = Strideformer(config)
     ```"""
     model_type: str = "strideformer"
-    keys_to_ignore_at_inference: List = ["first_model_hidden_states", "second_model_hidden_states"]
+    keys_to_ignore_at_inference: List = [
+        "first_model_hidden_states",
+        "second_model_hidden_states",
+    ]
 
     def __init__(
         self,
-        first_model_name_or_path: Optional[str] = "sentence-transformers/all-MiniLM-L6-v2",
+        first_model_name_or_path: Optional[
+            str
+        ] = "sentence-transformers/all-MiniLM-L6-v2",
         freeze_first_model: Optional[bool] = True,
         max_chunks: Optional[int] = 64,
         hidden_size: Optional[int] = 384,

@@ -65,12 +65,7 @@ class Strideformer(PreTrainedModel):
             first_model_config_path or config.first_model_name_or_path
         )
 
-        if first_init:
-            self.first_model = AutoModel.from_pretrained(
-                config.first_model_name_or_path
-            )
-        else:
-            self.first_model = AutoModel.from_config(self.first_model_config)
+        self.first_model = AutoModel.from_config(self.first_model_config)
 
         self.max_chunks = config.max_chunks
 
@@ -96,21 +91,26 @@ class Strideformer(PreTrainedModel):
         self.classifier = nn.Linear(config.hidden_size, config.num_labels)
 
         self._init_weights(self.modules(), self.config.initializer_range)
+        
+        if first_init:
+            self.first_model = AutoModel.from_pretrained(
+                config.first_model_name_or_path
+            )
 
     @staticmethod
     def mean_pooling(
-        output_embeddings: torch.FloatTensor,
+        token_embeddings: torch.FloatTensor,
         attention_mask: Optional[torch.FloatTensor] = None,
     ) -> torch.FloatTensor:
         """
-        Mean pool across the `sequence_length` dimension. Assumes that output
+        Mean pool across the `sequence_length` dimension. Assumes that token
         embeddings have shape `(batch_size, sequence_length, hidden_size)`.
         If batched, there can be pad tokens in the sequence.
         This will ignore padded outputs when doing mean pooling by using
         `attention_mask`.
 
         Args:
-            output_embeddings (`torch.FloatTensor`):
+            token_embeddings (`torch.FloatTensor`):
                 Embeddings to be averaged across the first dimension.
             attention_mask (`torch.LongTensor`):
                 Attention mask for the embeddings. Used to ignore
@@ -118,10 +118,9 @@ class Strideformer(PreTrainedModel):
 
         Returns:
             `torch.FloatTensor`of shape `(batch_size, hidden_size)` that is
-            `output_embeddings` averaged across the 1st dimension.
+            `token_embeddings` averaged across the 1st dimension.
         """
 
-        token_embeddings = output_embeddings
         if attention_mask is not None:
             input_mask_expanded = (
                 attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
@@ -280,6 +279,8 @@ class Strideformer(PreTrainedModel):
         first_model_path = str(
             Path(pretrained_model_name_or_path) / "first_model_config.json"
         )
+
+
         return super().from_pretrained(
             pretrained_model_name_or_path,
             first_model_config_path=first_model_path,
@@ -288,9 +289,8 @@ class Strideformer(PreTrainedModel):
             **kwargs,
         )
 
-    @classmethod
     def save_pretrained(
-        cls, save_directory: Optional[Union[str, os.PathLike]], *args, **kwargs
+        self, save_directory: Optional[Union[str, os.PathLike]], *args, **kwargs
     ):
         """
         Saves the model, the model.config, and the model.first_model_config to
@@ -300,9 +300,11 @@ class Strideformer(PreTrainedModel):
             save_directory (`str` or `os.PathLike`):
                 Directory to which to save. Will be created if it doesn't exist.
         """
-        cls.first_model_config.save_pretrained(save_directory)
+        self.first_model_config.save_pretrained(save_directory)
         first_model_config_path = Path(save_directory) / "config.json"
-        first_model_config_path.replace("first_model_config.json")
+        first_model_config_path.replace(
+            Path(save_directory) / "first_model_config.json"
+        )
 
         super().save_pretrained(save_directory, *args, **kwargs)
 

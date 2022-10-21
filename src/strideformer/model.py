@@ -5,7 +5,7 @@ from typing import Optional, Tuple, Union, Iterator
 
 import torch
 from torch import nn
-from transformers import PreTrainedModel, AutoModel, AutoConfig
+from transformers import PreTrainedModel, AutoModel, PretrainedConfig, AutoConfig
 from transformers.modeling_outputs import ModelOutput
 
 from .config import StrideformerConfig
@@ -36,17 +36,46 @@ class StrideformerOutput(ModelOutput):
 
 
 class Strideformer(PreTrainedModel):
-    def __init__(self, config: StrideformerConfig) -> None:
+
+    config_class = StrideformerConfig
+    supports_gradient_checkpointing = False
+
+    def __init__(
+        self,
+        config: StrideformerConfig,
+        first_model_config_path: Optional[Union[str, os.PathLike]] = None,
+        first_init: Optional[bool] = False,
+    ) -> None:
         """
         Initializes Strideformer model with random values.
         Use `from_pretrained` to load pretrained weights.
+
+        Args:
+            config (StrideformerConfig):
+                Configuration file for this model. Holds the information for what
+                pretrained model to use for the first model and all of the parameters
+                for the hidden_size,
         """
-        super().__init__(config)
+        super().__init__(
+            config,
+        )
         self.config = config
 
-        self.first_model_config = AutoConfig.from_pretrained(config.first_model_name_or_path)
+        self.first_model_config = AutoConfig.from_pretrained(
+            first_model_config_path or config.first_model_name_or_path
+        )
+
         self.first_model = AutoModel.from_config(self.first_model_config)
+
         self.max_chunks = config.max_chunks
+
+        if self.first_model_config.hidden_size != config.hidden_size:
+            raise ValueError(
+                "The hidden size of the first model \
+                {self.first_model_config.hidden_size} needs to be the same \
+                size as the hidden size of the second model {config.hidden_size}"
+            )
+
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=config.hidden_size,
             nhead=config.num_attention_heads,
@@ -62,32 +91,36 @@ class Strideformer(PreTrainedModel):
         self.classifier = nn.Linear(config.hidden_size, config.num_labels)
 
         self._init_weights(self.modules(), self.config.initializer_range)
+        
+        if first_init:
+            self.first_model = AutoModel.from_pretrained(
+                config.first_model_name_or_path
+            )
 
     @staticmethod
     def mean_pooling(
-        output_embeddings: torch.FloatTensor,
+        token_embeddings: torch.FloatTensor,
         attention_mask: Optional[torch.FloatTensor] = None,
     ) -> torch.FloatTensor:
         """
-        Mean pool across the `sequence_length` dimension. Assumes that output 
+        Mean pool across the `sequence_length` dimension. Assumes that token
         embeddings have shape `(batch_size, sequence_length, hidden_size)`.
         If batched, there can be pad tokens in the sequence.
         This will ignore padded outputs when doing mean pooling by using
         `attention_mask`.
 
         Args:
-            output_embeddings (`torch.FloatTensor`):
+            token_embeddings (`torch.FloatTensor`):
                 Embeddings to be averaged across the first dimension.
             attention_mask (`torch.LongTensor`):
-                Attention mask for the embeddings. Used to ignore 
+                Attention mask for the embeddings. Used to ignore
                 padd tokens from the averaging.
 
         Returns:
-            `torch.FloatTensor`of shape `(batch_size, hidden_size)` that is 
-            `output_embeddings` averaged across the 1st dimension.
+            `torch.FloatTensor`of shape `(batch_size, hidden_size)` that is
+            `token_embeddings` averaged across the 1st dimension.
         """
 
-        token_embeddings = output_embeddings
         if attention_mask is not None:
             input_mask_expanded = (
                 attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
@@ -131,14 +164,18 @@ class Strideformer(PreTrainedModel):
                 This gets reshaped to `(batch_size, chunks_per_batch, hidden_size)`. This means that
                 all document sequences must be tokenized to the same number of chunks.
         Returns:
-            A `tuple` of `torch.Tensor` if `return_dict` is `False`. 
+            A `tuple` of `torch.Tensor` if `return_dict` is `False`.
             A `StrideformerOutput` object if `return_dict` is None or True.
-            These containers hold values for loss, logits, and last hidden states for 
+            These containers hold values for loss, logits, and last hidden states for
             both models.
         """
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
-        token_type_ids = {"token_type_ids": token_type_ids} if token_type_ids is not None else {}
+        token_type_ids = (
+            {"token_type_ids": token_type_ids} if token_type_ids is not None else {}
+        )
 
         if self.config.freeze_first_model:
             # No gradients, no training, save memory
@@ -155,8 +192,10 @@ class Strideformer(PreTrainedModel):
                 **token_type_ids,
             )[0]
 
-        # mean pool last hidden state 
-        embeddings = self.mean_pooling(first_model_hidden_states, attention_mask=attention_mask)
+        # mean pool last hidden state
+        embeddings = self.mean_pooling(
+            first_model_hidden_states, attention_mask=attention_mask
+        )
 
         second_model_hidden_states = self.second_model(
             embeddings.reshape(batch_size, -1, self.config.hidden_size),
@@ -211,6 +250,64 @@ class Strideformer(PreTrainedModel):
             second_model_hidden_states=second_model_hidden_states,
         )
 
+    @classmethod
+    def from_pretrained(
+        cls,
+        pretrained_model_name_or_path: Optional[Union[str, os.PathLike]],
+        *model_args,
+        **kwargs
+    ):
+        """
+        Loads the model weights, the model.config, and the model.first_model_config from
+        `pretrained_model_name_or_path`.
+
+        Note: This is NOT the function that should be called the first time you create a
+        Strideformer model. Even though the first model comes pretrained, the
+        `Strideformer.from_pretrained` method is for loading after the second model
+        has been trained.
+
+        To load the model the first time, use `Strideformer(config, first_init=True)`
+
+        Args:
+            pretrained_model_name_or_path (`str` or `os.PathLike`):
+                A path to a *directory* containing model weights saved using
+                [`Strideformer.save_pretrained`], e.g., `./my_model_directory/`.
+
+        Returns:
+            (Strideformer) with pretrained weights loaded.
+        """
+        first_model_path = str(
+            Path(pretrained_model_name_or_path) / "first_model_config.json"
+        )
+
+
+        return super().from_pretrained(
+            pretrained_model_name_or_path,
+            first_model_config_path=first_model_path,
+            first_init=False,
+            *model_args,
+            **kwargs,
+        )
+
+    def save_pretrained(
+        self, save_directory: Optional[Union[str, os.PathLike]], *args, **kwargs
+    ):
+        """
+        Saves the model, the model.config, and the model.first_model_config to
+        `save_directory`.
+
+        Args:
+            save_directory (`str` or `os.PathLike`):
+                Directory to which to save. Will be created if it doesn't exist.
+        """
+        self.first_model_config.save_pretrained(save_directory)
+        first_model_config_path = Path(save_directory) / "config.json"
+        first_model_config_path.replace(
+            Path(save_directory) / "first_model_config.json"
+        )
+
+        super().save_pretrained(save_directory, *args, **kwargs)
+
     @staticmethod
     def _init_weights(modules: Iterator[nn.Module], std: float = 0.02) -> None:
         """
@@ -219,7 +316,7 @@ class Strideformer(PreTrainedModel):
             modules (Iterator of `torch.nn.Module`)
                 Iterator of modules to be initialized. Typically by calling Module.modules()
             std (`float`, *optional*, defaults to 0.02)
-                Standard deviation for normally distributed weight initialization 
+                Standard deviation for normally distributed weight initialization
         """
         for module in modules:
             if isinstance(module, torch.nn.Linear):

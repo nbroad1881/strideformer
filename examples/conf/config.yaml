@@ -10,19 +10,22 @@ defaults:
 
 
 model:
-  model_name_or_path:  "sentence-transformers/all-mpnet-base-v2"
-  short_model_max_chunks: 128
-  hidden_act: gelu
-  intermediate_size: 4096
-  layer_norm_eps: 1e-7
-  num_attention_heads: 12
+  first_model_name_or_path:  "sentence-transformers/all-mpnet-base-v2"
+  freeze_first_model: yes
+  max_chunks: 128
+  hidden_size: 768
   num_hidden_layers: 36
+  num_attention_heads: 12
+  intermediate_size: 4096
+  hidden_act: gelu
+  dropout: 0.1
+  layer_norm_eps: 1e-7
 
   
 data:
   max_seq_length: 256
   pad_multiple: 8
-  stride: 128
+  stride: 128 # set to `null` to not use Strideformer
   n_rows: 2000
   map_batch_size: 500 # batch size when using `datasets.map`
   dataset_name: null

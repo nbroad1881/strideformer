@@ -13,16 +13,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Finetuning short model chunks for long sequence classification"""
+""" Breaking long documents into short chunks for long sequence classification"""
 
 import logging
 import os
 import math
-from pathlib import Path
-from itertools import chain
 
 from tqdm.auto import tqdm
-from sklearn.metrics import f1_score
 import torch
 from torch.utils.data import DataLoader
 import hydra
@@ -41,7 +38,7 @@ from transformers import (
 from transformers.trainer_pt_utils import IterableDatasetShard
 from transformers.training_args import trainer_log_levels
 from transformers.utils import flatten_dict
-from accelerate import Accelerator
+from accelerate import Accelerator, DistributedDataParallelKwargs
 from accelerate.logging import get_logger
 import evaluate
 
@@ -58,30 +55,35 @@ logger = get_logger(__name__)
 
 
 def set_logging_verbosity(accelerator, training_args):
+
+    log_level = trainer_log_levels[training_args.log_level]
+
     # Make one log on every process with the configuration for debugging.
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
-        level=training_args.log_level,
+        level=log_level,
     )
     logger.info(accelerator.state, main_process_only=False)
 
-    if training_args.log_level != -1:
-        logger.setLevel(training_args.log_level)
+    if log_level != -1:
+        logger.setLevel(log_level)
 
     if accelerator.is_local_main_process:
-        if training_args.log_level == -1:
+        if log_level == -1:
             datasets.utils.logging.set_verbosity_warning()
             transformers.utils.logging.set_verbosity_info()
         else:
-            datasets.utils.logging.set_verbosity(training_args.log_level)
-            transformers.utils.logging.set_verbosity(training_args.log_level)
+            datasets.utils.logging.set_verbosity(log_level)
+            transformers.utils.logging.set_verbosity(log_level)
     else:
         datasets.utils.logging.set_verbosity_error()
         transformers.utils.logging.set_verbosity_error()
 
 
-def training_loop(accelerator, model, optimizer, lr_scheduler, dataloaders, args):
+def training_loop(
+    accelerator, model, optimizer, lr_scheduler, dataloaders, args, metrics
+):
 
     progress_bar = tqdm(
         range(args.max_steps),
@@ -140,6 +142,7 @@ def training_loop(accelerator, model, optimizer, lr_scheduler, dataloaders, args
                         f"Training: Epoch {epoch} | Loss {details['train_loss']} | Step {details['step']}"
                     )
 
+                break
                 if completed_steps >= args.max_steps:
                     break
 
@@ -150,6 +153,7 @@ def training_loop(accelerator, model, optimizer, lr_scheduler, dataloaders, args
                 model=model,
                 dataloader=dataloaders["validation"],
                 prefix="eval",
+                metrics=metrics,
             )
 
             eval_metrics.update(
@@ -166,7 +170,7 @@ def training_loop(accelerator, model, optimizer, lr_scheduler, dataloaders, args
 
 
 @torch.no_grad()
-def eval_loop(accelerator, model, dataloader, prefix):
+def eval_loop(accelerator, model, dataloader, prefix, metrics):
 
     model.eval()
 
@@ -185,20 +189,24 @@ def eval_loop(accelerator, model, dataloader, prefix):
         outputs = model(**batch)
 
         eval_loss += accelerator.gather(outputs["loss"]).detach().float()
-        
-        preds, labels = accelerator.gather_for_metrics((outputs["logits"].argmax(-1), batch["labels"]))
-        metrics.add_batch(preds, labels)
+
+        preds, labels = accelerator.gather_for_metrics(
+            (outputs["logits"].argmax(-1), batch["labels"])
+        )
+        metrics.add_batch(predictions=preds, references=labels)
 
         progress_bar.update(1)
 
+    metric_results = metrics.compute()
 
     metrics_desc = " | ".join(
-        [f"{name.capitalize()} {round(score, 4)}" for name, score in metrics.items()]
+        [
+            f"{name.capitalize()} {round(score, 4)}"
+            for name, score in metric_results.items()
+        ]
     )
 
     progress_bar.set_description(f"{prefix}: {metrics_desc}")
-
-    metric_results = metrics.compute()
 
     for name in metric_results.keys():
         if not name.startswith(prefix):
@@ -297,10 +305,13 @@ def main(cfg: DictConfig) -> None:
         )
         log_with.append(mlflow_tracker)
 
+    ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
+
     accelerator = Accelerator(
         mixed_precision=mixed_precision,
         log_with=log_with,
         gradient_accumulation_steps=training_args.gradient_accumulation_steps,
+        kwargs_handlers=[ddp_kwargs],
     )
 
     set_logging_verbosity(accelerator, training_args)
@@ -401,9 +412,7 @@ def main(cfg: DictConfig) -> None:
         )
 
     if USE_STRIDEFORMER:
-        model = Strideformer.from_pretrained(
-            cfg.model.model_name_or_path, config=model_config
-        )
+        model = Strideformer(config=model_config, first_init=True)
     else:
         model = AutoModelForSequenceClassification.from_pretrained(
             cfg.model.model_name_or_path, config=model_config
@@ -445,11 +454,11 @@ def main(cfg: DictConfig) -> None:
         if accelerator.is_main_process:
             experiment_config = OmegaConf.to_container(cfg)
 
-            experiment_config.update(model.config.to_diff_dict())
+            experiment_config.update(model_config.to_diff_dict())
 
             accelerator.init_trackers(cfg.project_name, flatten_dict(experiment_config))
 
-    metrics = evaluate.combine(["accuracy", "f1", "precision", "recall"])
+    metrics = evaluate.load("accuracy")
 
     completed_steps = training_loop(
         accelerator,
@@ -458,6 +467,7 @@ def main(cfg: DictConfig) -> None:
         lr_scheduler,
         dataloaders,
         training_args,
+        metrics,
     )
 
     if training_args.do_predict:
@@ -467,6 +477,7 @@ def main(cfg: DictConfig) -> None:
             model=model,
             dataloader=dataloaders["test"],
             prefix="test",
+            metrics=metrics,
         )
 
         accelerator.log(test_metrics, step=completed_steps)

@@ -5,7 +5,7 @@
 import sys
 import logging
 from functools import partial
-from collections import defaultdict
+from collections import defaultdict, Counter
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
@@ -70,7 +70,7 @@ def setup_logging(training_args):
     transformers.utils.logging.enable_explicit_format()
 
     mixed_precision = "fp16" if training_args.fp16 else "fp32"
-    mixed_precision = "bf16" if training_args.use_bf16 else mixed_precision
+    mixed_precision = "bf16" if training_args.bf16 else mixed_precision
 
      # Log on each process the small summary:
     logger.warning(
@@ -97,7 +97,7 @@ def get_model_config(cfg, data_module, use_strideformer):
     """
     if use_strideformer:
         return StrideformerConfig(
-            first_model_name_or_path=cfg.model.first_model_name_or_path,
+            first_model_name_or_path=cfg.model.model_name_or_path,
             freeze_first_model=cfg.model.freeze_first_model,
             max_chunks=cfg.model.max_chunks,
             hidden_size=cfg.model.hidden_size,
@@ -143,34 +143,46 @@ def get_model(model_config, cfg, use_strideformer):
     )
 
 
-def load_compute_metrics():
+def load_compute_metrics(id2label):
     """
     Returns:
         function: function that computes metrics for the trainer
     """
 
     metrics = {
-        "accuracy": evaluate.load_metric("accuracy"),
-        "f1_micro": evaluate.load_metric("f1"),
-        "f1_macro": evaluate.load_metric("f1"),
-        "precision": evaluate.load_metric("precision"),
-        "recall": evaluate.load_metric("recall"),
+        "accuracy": evaluate.load("accuracy"),
+        "f1_micro": evaluate.load("f1"),
+        "f1_macro": evaluate.load("f1"),
+        "precision_micro": evaluate.load("precision"),
+        "recall_micro": evaluate.load("recall"),
     }
 
     metric_kwargs = defaultdict(lambda: {"average": "micro"})
     metric_kwargs["accuracy"] = {}
+    metric_kwargs["f1_macro"] = {"average": "macro"}
 
     def compute_metrics(eval_pred, metrics, metric_kwargs):
-        predictions, labels = eval_pred
+        predictions, label_ids = eval_pred
         predictions = predictions[0] if isinstance(predictions, tuple) else predictions
-        predictions = predictions.argmax(dim=1)
-
-        all_scores = {
-            name: metrics[name].compute(
-                predictions=predictions, references=labels, **metric_kwargs[name]
+        predictions = predictions.argmax(axis=-1)
+        
+        
+        all_scores = {}
+        for name, met in metrics.items():
+            score_dict = met.compute(
+                predictions=predictions, references=label_ids, **metric_kwargs[name]
             )
-            for name in metrics
-        }
+            val = list(score_dict.values())[0]
+            
+            all_scores[name] = val
+        
+        labels = [id2label[id_] for id_ in label_ids]
+        
+        label_counter = Counter(labels)
+        
+        for label_name, count in label_counter.items():
+            all_scores[f"num_{label_name}"] = count
+            
         return all_scores
 
     return partial(compute_metrics, metrics=metrics, metric_kwargs=metric_kwargs)
@@ -252,7 +264,7 @@ def main(cfg: DictConfig) -> None:
         eval_dataset=eval_dataset,
         data_collator=collator,
         tokenizer=data_module.tokenizer,
-        compute_metrics=load_compute_metrics(),
+        compute_metrics=load_compute_metrics(data_module.id2label),
     )
 
     if training_args.do_train:
@@ -278,3 +290,7 @@ def main(cfg: DictConfig) -> None:
         predict_metrics = predict_results.metrics
         trainer.log_metrics("predict", predict_metrics)
         trainer.save_metrics("predict", predict_metrics)
+
+        
+if __name__ == "__main__":
+    main()

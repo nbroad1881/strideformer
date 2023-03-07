@@ -1,11 +1,8 @@
 """ Strideformer model configuration """
-from typing import Optional, List
+import copy
+from typing import Dict
 
-from transformers import PretrainedConfig
-from transformers.utils import logging
-
-
-logger = logging.get_logger(__name__)
+from transformers import PretrainedConfig, AutoConfig
 
 
 class StrideformerConfig(PretrainedConfig):
@@ -15,8 +12,8 @@ class StrideformerConfig(PretrainedConfig):
     Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
     documentation from [`PretrainedConfig`] for more information.
     Args:
-        first_model_name_or_path (`str`, *optional*, defaults to `"sentence-transformers/all-MiniLM-L6-v2"`):
-            The model name or path to the first model that is usually a pre-trained sentence transformer.
+        first_model_config (`PretrainedConfig`, *optional*, defaults to `None`):
+            The configuration of the first model. 
         freeze_first_model (`bool`, *optional*, defaults to `True`):
             If True, freeze the weights of the first model. Otherwise, train it as well.
         max_chunks (`int`, *optional*, defaults to 64)
@@ -42,49 +39,50 @@ class StrideformerConfig(PretrainedConfig):
             The number of labels for the classifier.
 
     Example:
+    
     ```python
     >>> from strideformer import StrideformerConfig, Strideformer
-    >>> config = StrideformerConfig("sentence-transformers/all-MiniLM-L6-v2", max_chunks=128)
+    >>> from transformers import AutoConfig
+    >>> first_model_config = AutoConfig.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
+    >>> config = StrideformerConfig(first_model_config, max_chunks=128)
     >>> model = Strideformer(config)
-    ```"""
-    model_type: str = "strideformer"
-    keys_to_ignore_at_inference: List = [
+    ```
+
+    """
+    model_type = "strideformer"
+    keys_to_ignore_at_inference = [
         "first_model_hidden_states",
         "second_model_hidden_states",
     ]
+    is_composition = True
 
     def __init__(
         self,
-        first_model_name_or_path: Optional[
-            str
-        ] = "sentence-transformers/all-MiniLM-L6-v2",
-        freeze_first_model: Optional[bool] = True,
-        max_chunks: Optional[int] = 64,
-        hidden_size: Optional[int] = 384,
-        initializer_range: Optional[float] = 0.02,
-        num_hidden_layers: Optional[int] = 24,
-        num_attention_heads: Optional[int] = 12,
-        intermediate_size: Optional[int] = 4096,
-        hidden_act: Optional[str] = "gelu",
-        dropout: Optional[float] = 0.1,
-        layer_norm_eps: Optional[float] = 1e-7,
-        num_labels: Optional[int] = 2,
         **kwargs
-    ):
-        self.first_model_name_or_path = first_model_name_or_path
-        self.freeze_first_model = freeze_first_model
-        self.max_chunks = max_chunks
-        self.hidden_size = hidden_size
-        self.initializer_range = initializer_range
-        self.num_hidden_layers = num_hidden_layers
-        self.num_attention_heads = num_attention_heads
-        self.intermediate_size = intermediate_size
-        self.hidden_act = hidden_act
-        self.dropout = dropout
-        self.layer_norm_eps = layer_norm_eps
-        self.num_labels = num_labels
+    ):        
+        first_model_config_dict = kwargs.pop("first_model_config")
+        first_model_type = first_model_config_dict.pop("model_type")
+        self.first_model_config = AutoConfig.for_model(first_model_type, **first_model_config_dict)
 
-        super().__init__(
-            num_labels=num_labels,
-            **kwargs,
+        super().__init__(**kwargs)
+        
+
+
+    @classmethod
+    def from_two_configs(cls, first_model_config: PretrainedConfig, second_model_config: Dict):
+        
+        return cls(
+            first_model_config=first_model_config.to_dict(),
+            **second_model_config
         )
+
+    def to_dict(self):
+        """
+        Serializes this instance to a Python dictionary. Override the default *to_dict()* from *PretrainedConfig*.
+        Returns:
+            `Dict[str, any]`: Dictionary of all the attributes that make up this configuration instance,
+        """
+        output = copy.deepcopy(self.__dict__)
+        output["first_model_config"] = self.first_model_config.to_dict()
+        output["model_type"] = self.__class__.model_type
+        return output

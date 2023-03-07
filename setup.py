@@ -27,7 +27,7 @@ EXTRAS_REQUIRE["dev"] = combine_requirements([k for k in EXTRAS_REQUIRE])
 
 setup(
     name="strideformer",
-    version="0.1.2",
+    version="0.1.3",
     description="Package to use a two-stage transformer for long-document classification",
     long_description=LONG_DESCRIPTION,
     author="Nicholas Broad",
@@ -39,5 +39,5 @@ setup(
     packages=find_packages("src"),
     install_requires=REQUIRED_PKGS,
     extras_require=EXTRAS_REQUIRE,
-    keywords="nlp, machine learning, transformers",
+    keywords="nlp, machine learning, transformers, long sequence",
 )

@@ -1,21 +1,26 @@
 from pathlib import Path
-from itertools import chain
 from functools import partial
-from typing import Dict
+from typing import Dict, Optional, Tuple, List
 from collections import defaultdict
 from dataclasses import dataclass
 
-import datasets
-from datasets import load_dataset
-from transformers import AutoTokenizer
-import torch
-from omegaconf import OmegaConf
+from datasets import load_dataset, Dataset
+from transformers import AutoTokenizer, PreTrainedTokenizer
+from omegaconf import OmegaConf, DictConfig
 
 
 @dataclass
 class DataModule:
+    """
+    Responsible for loading and tokenizing the dataset.
+    Can handle local files or datasets from the Hugging Face Hub.
 
-    cfg: Dict = None
+    If no dataset is specified, it will load a local file.
+    Otherwise, it will load a dataset from the Hub.
+    """
+
+
+    cfg: DictConfig = None
 
     def __post_init__(self):
         if self.cfg is None:
@@ -48,66 +53,23 @@ class DataModule:
         self.label2id = processor.get_label2id()
         self.id2label = {i: l for l, i in self.label2id.items()}
 
-    def get_train_dataset(self, tokenized: bool = True) -> datasets.Dataset:
-        if tokenized:
-            return self.tokenized_dataset["train"]
-        return self.raw_dataset["train"]
+    def get_train_dataset(self, tokenized: bool = True) -> Dataset:
+        ds_attr = "tokenized_dataset" if tokenized else "raw_dataset"
+        return getattr(self, ds_attr)["train"]
 
-    def get_eval_dataset(self, tokenized: bool = True) -> datasets.Dataset:
-        if tokenized:
-            if "validation" not in self.tokenized_dataset:
-                return None
-            return self.tokenized_dataset["validation"]
+    def get_eval_dataset(self, tokenized: bool = True) -> Dataset:
+        ds_attr = "tokenized_dataset" if tokenized else "raw_dataset"
 
-        if "validation" not in self.raw_dataset:
+        if "validation" not in getattr(self, ds_attr):
             return None
+        return getattr(self, ds_attr)["validation"]
 
-        return self.raw_dataset["validation"]
+    def get_test_dataset(self, tokenized: bool = True) -> Dataset:
+        ds_attr = "tokenized_dataset" if tokenized else "raw_dataset"
 
-    def get_test_dataset(self, tokenized: bool = True) -> datasets.Dataset:
-        if tokenized:
-            if "test" not in self.tokenized_dataset:
-                return None
-            return self.tokenized_dataset["test"]
-
-        if "test" not in self.raw_dataset:
+        if "test" not in getattr(self, ds_attr):
             return None
-
-        return self.raw_dataset["test"]
-
-
-class StrideformerCollator:
-    def __init__(self, tokenizer):
-        self.tokenizer = tokenizer
-
-    def __call__(self, features):
-        """
-        This expects to get examples from the dataset.
-        Each row in the dataset will have
-            input_ids [num_chunks, sequence_length]
-            attention_mask [num_chunks, sequence_length]
-            label [num_classes]
-
-        The text should already be tokenized and padded to the documents longest sequence.
-
-
-        """
-        label_key = "label" if "label" in features[0] else "labels"
-
-        ids = list(chain(*[x["input_ids"] for x in features]))
-        mask = list(chain(*[x["attention_mask"] for x in features]))
-        labels = [x[label_key] for x in features]
-
-        longest_seq = max([len(x) for x in ids])
-
-        ids = [x + [self.tokenizer.pad_token_id] * (longest_seq - len(x)) for x in ids]
-        mask = [x + [0] * (longest_seq - len(x)) for x in mask]
-
-        return {
-            "input_ids": torch.tensor(ids, dtype=torch.long),
-            "attention_mask": torch.tensor(mask, dtype=torch.long),
-            "labels": torch.tensor(labels, dtype=torch.long),
-        }
+        return getattr(self, ds_attr)["test"]
 
 
 class GenericDatasetProcessor:
@@ -115,23 +77,23 @@ class GenericDatasetProcessor:
     Can load any dataset from the Hub.
     """
 
-    def __init__(self, cfg, tokenizer):
+    def __init__(self, cfg: DictConfig, tokenizer: PreTrainedTokenizer) -> None:
         super().__init__()
 
         self.cfg = cfg
         self.tokenizer = tokenizer
 
-    def set_label2id(self, train_dataset):
+    def set_label2id(self, train_dataset: Dataset) -> None:
 
         labels = train_dataset.unique(self.cfg.data.label_col)
         labels = sorted(labels)
 
         self.label2id = {label: i for i, label in enumerate(labels)}
 
-    def get_label2id(self):
+    def get_label2id(self) -> Dict[str, int]:
         return self.label2id
 
-    def prepare_dataset(self):
+    def prepare_dataset(self) -> Tuple[Dataset, Dataset]:
         raw_dataset = load_dataset(
             self.cfg.data.dataset_name, self.cfg.data.dataset_config_name
         )
@@ -163,18 +125,25 @@ class GenericDatasetProcessor:
         return raw_dataset, tokenized_dataset
 
 
-class HealthFactProcessor:
-    def __init__(self, cfg, tokenizer):
+class PubHealthProcessor:
+    """
+    Data processor for the PUBHEALTH dataset.
+    https://huggingface.co/datasets/health_fact
+    """
+
+    def __init__(self, cfg: DictConfig, tokenizer: PreTrainedTokenizer) -> None:
         super().__init__()
 
         self.cfg = cfg
         self.tokenizer = tokenizer
 
     @staticmethod
-    def get_label2id():
-        return {"false": 0, "mixture": 1, "true": 2, "unproven": 3}
+    def get_label2id() -> Dict[str, int]:
+        return {"false": 0, "mixture": 1,
+                 "true": 2, "unproven": 3}
 
-    def prepare_dataset(self):
+    def prepare_dataset(self) -> Tuple[Dataset, Dataset]:
+
         raw_dataset = load_dataset(
             self.cfg.data.dataset_name, self.cfg.data.dataset_config_name
         )
@@ -210,14 +179,23 @@ class HealthFactProcessor:
 
 
 class ArxivProcessor:
-    def __init__(self, cfg, tokenizer):
+    
+    """
+    Data processor for the arxiv dataset.
+    https://huggingface.co/datasets/ccdv/arxiv-classification
+
+    Task: Given an arxiv paper, predict the subject area.
+    """
+
+
+    def __init__(self, cfg: DictConfig, tokenizer: PreTrainedTokenizer) -> None:
         super().__init__()
 
         self.cfg = cfg
         self.tokenizer = tokenizer
 
     @staticmethod
-    def get_label2id():
+    def get_label2id() -> Dict[str, int]:
 
         labels = [
             "math.AC",
@@ -235,7 +213,8 @@ class ArxivProcessor:
 
         return {label: i for i, label in enumerate(labels)}
 
-    def prepare_dataset(self):
+    def prepare_dataset(self) -> Tuple[Dataset, Dataset]:
+
         raw_dataset = load_dataset(
             self.cfg.data.dataset_name, self.cfg.data.dataset_config_name
         )
@@ -271,13 +250,13 @@ class LocalFileProcessor:
     Can load csv, json, or parquet files that are on local storage.
     """
 
-    def __init__(self, cfg, tokenizer):
+    def __init__(self, cfg: DictConfig, tokenizer: PreTrainedTokenizer) -> None:
         super().__init__()
 
         self.cfg = cfg
         self.tokenizer = tokenizer
 
-    def prepare_dataset(self):
+    def prepare_dataset(self) -> Tuple[Dataset, Dataset]:
 
         # get ending of file (csv, json, parquet)
         filetype = Path(self.cfg.data.data_files["train"][0]).suffix
@@ -327,14 +306,14 @@ class LocalFileProcessor:
 
         return raw_dataset, tokenized_dataset
 
-    def set_label2id(self, train_dataset):
+    def set_label2id(self, train_dataset: Dataset) -> None:
 
         labels = train_dataset.unique(self.cfg.data.label_col)
         labels = sorted(labels)
 
         self.label2id = {label: i for i, label in enumerate(labels)}
 
-    def get_label2id(self):
+    def get_label2id(self) -> Dict[str, int]:
         """
         Must be called after `set_label2id`
         """
@@ -349,7 +328,8 @@ def tokenize(
     text_col="text",
     text_pair_col=None,
     label_col="label",
-):
+) -> Dict[str, List[int]]:
+    
     tokenizer_kwargs = {
         "padding": False,
     }
@@ -380,7 +360,8 @@ def tokenize(
     return tokenized
 
 
-def change_label_to_int(example, label2id, label_col):
+def change_label_to_int(example: Dict[str, str], label2id: Dict[str, int], label_col: str):
+
     if isinstance(example[label_col], list):
         return {
             label_col: [label2id[l] for l in example[label_col]]
@@ -397,7 +378,7 @@ name2processor = defaultdict(lambda: GenericDatasetProcessor)
 
 name2processor.update(
     {
-        "health_fact": HealthFactProcessor,
+        "health_fact": PubHealthProcessor,
         "ccdv/arxiv-classification": ArxivProcessor,
     }
 )

@@ -18,7 +18,6 @@
 import logging
 import os
 import math
-from pathlib import Path
 from itertools import chain
 
 from tqdm.auto import tqdm
@@ -32,25 +31,22 @@ import transformers
 from transformers import (
     AutoConfig,
     AutoModelForSequenceClassification,
-    Trainer,
     TrainingArguments,
     set_seed,
     get_scheduler,
     DataCollatorWithPadding,
 )
 from transformers.trainer_pt_utils import IterableDatasetShard
-from transformers.training_args import trainer_log_levels
 from transformers.utils import flatten_dict
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 
 from utils import (
-    MLflowTracker,
     set_wandb_env_vars,
     set_mlflow_env_vars,
 )
-from strideformer import Strideformer, StrideformerConfig
-from data import DataModule, StrideformerCollator
+from strideformer import Strideformer, StrideformerConfig, StrideformerCollator
+from data import DataModule
 
 
 logger = get_logger(__name__)
@@ -75,26 +71,26 @@ def training_loop(accelerator, model, optimizer, lr_scheduler, dataloaders, args
         example_count = 0
         for step, batch in enumerate(dataloaders["train"]):
 
-            outputs = model(**batch)
-            loss = outputs["loss"]
+            with accelerator.accumulate(model):
+                outputs = model(**batch)
+                loss = outputs["loss"]
 
-            example_count += batch["labels"].numel()
+                example_count += batch["labels"].numel()
 
-            # We keep track of the loss at each epoch
-            if args.report_to is not None:
-                epoch_loss += loss.detach().float() * batch["labels"].numel()
+                # We keep track of the loss at each epoch
+                if args.report_to is not None:
+                    epoch_loss += loss.detach().float() * batch["labels"].numel()
 
-            loss = loss / args.gradient_accumulation_steps
-            accelerator.backward(loss)
-            if (
-                step % args.gradient_accumulation_steps == 0
-                or step == len(dataloaders["train"]) - 1
-            ):
+                loss = loss / args.gradient_accumulation_steps
+                accelerator.backward(loss)
+
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
-                progress_bar.update(1)
-                completed_steps += 1
+                
+                if (step+1) % args.gradient_accumulation_steps == 0:
+                    progress_bar.update(1)
+                    completed_steps += 1
 
             if args.save_strategy == "steps":
                 checkpointing_steps = args.save_steps
@@ -229,9 +225,7 @@ def train_samples_steps_epochs(dataloader, args):
         args.train_batch_size * args.gradient_accumulation_steps * args.world_size
     )
 
-    len_dataloader = len(dataloader)
-    num_update_steps_per_epoch = len_dataloader // args.gradient_accumulation_steps
-    num_update_steps_per_epoch = max(num_update_steps_per_epoch, 1)
+    num_update_steps_per_epoch = math.ceil(len(dataloader) / args.gradient_accumulation_steps)
 
     if args.max_steps > 0:
         max_steps = args.max_steps
@@ -253,9 +247,19 @@ def train_samples_steps_epochs(dataloader, args):
 
 def get_optimizer_and_scheduler(model, train_dataloader, args):
 
-    optim_cls, optim_args = Trainer.get_optimizer_cls_and_kwargs(args)
-
-    optimizer = optim_cls(model.parameters(), **optim_args)
+    # Split weights in two groups, one with weight decay and the other not.
+    no_decay = ["bias", "LayerNorm.weight"]
+    optimizer_grouped_parameters = [
+        {
+            "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
+            "weight_decay": args.weight_decay,
+        },
+        {
+            "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
+            "weight_decay": 0.0,
+        },
+    ]
+    optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate)
 
     num_train_samples, max_steps, num_train_epochs = train_samples_steps_epochs(
         train_dataloader, args
@@ -283,44 +287,37 @@ def main(cfg: DictConfig) -> None:
     if training_args.bf16:
         mixed_precision = "bf16"
 
-    log_with = training_args.report_to
     if "wandb" in training_args.report_to:
         set_wandb_env_vars(cfg)
     if "mlflow" in training_args.report_to:
         set_mlflow_env_vars(cfg)
-        log_with.remove("mlflow")
-        mlflow_tracker = MLflowTracker(
-            experiment_name=cfg.mlflow.experiment_name,
-            logging_dir=cfg.mlflow.logging_dir or cfg.training_arguments.output_dir,
-            run_id=cfg.mlflow.run_id,
-            tags=cfg.mlflow.tags,
-            nested_run=cfg.mlflow.nested_run,
-            run_name=cfg.mlflow.run_name,
-            description=cfg.mlflow.description,
+
+    accelerator = Accelerator(
+        mixed_precision=mixed_precision, 
+        log_with=training_args.report_to,
+        gradient_accumulation_steps=training_args.gradient_accumulation_steps,
         )
-        log_with.append(mlflow_tracker)
 
-    # TODO: add logging with mlflow
-    accelerator = Accelerator(mixed_precision=mixed_precision, log_with=log_with)
-
+    log_level = training_args.get_process_log_level()
     # Make one log on every process with the configuration for debugging.
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
-        level=training_args.log_level,
+        level=log_level,
     )
     logger.info(accelerator.state, main_process_only=False)
 
-    if training_args.log_level != -1:
-        logger.setLevel(training_args.log_level)
+    
+    if log_level != -1:
+        logger.setLevel(log_level)
 
     if accelerator.is_local_main_process:
-        if training_args.log_level == -1:
+        if log_level == -1:
             datasets.utils.logging.set_verbosity_warning()
             transformers.utils.logging.set_verbosity_info()
         else:
-            datasets.utils.logging.set_verbosity(training_args.log_level)
-            transformers.utils.logging.set_verbosity(training_args.log_level)
+            datasets.utils.logging.set_verbosity(log_level)
+            transformers.utils.logging.set_verbosity(log_level)
     else:
         datasets.utils.logging.set_verbosity_error()
         transformers.utils.logging.set_verbosity_error()
@@ -342,7 +339,10 @@ def main(cfg: DictConfig) -> None:
     with training_args.main_process_first(desc="Dataset loading and tokenization"):
         data_module.prepare_dataset()
 
-    if cfg.data.stride is not None and cfg.data.stride > 0:
+
+    use_strideformer = cfg.data.stride is not None and cfg.data.stride > 0
+
+    if use_strideformer:
         collator = StrideformerCollator(tokenizer=data_module.tokenizer)
 
         # batch_sizes must always be 1 when using strided approach
@@ -392,28 +392,34 @@ def main(cfg: DictConfig) -> None:
             pin_memory=training_args.dataloader_pin_memory,
         )
 
+
     model_config = AutoConfig.from_pretrained(
-        cfg.model.model_name_or_path,
-        num_labels=len(data_module.label2id),
-        label2id=data_module.label2id,
-        id2label=data_module.id2label,
+            cfg.model.model_name_or_path,
     )
-
-    if cfg.data.stride is not None and cfg.data.stride > 0:
-        model_config.update(
-            {
-                "short_model": cfg.model.model_name_or_path,
-                "short_model_max_chunks": cfg.model.short_model_max_chunks,  # maximum number of chunks to break the document into
-                "hidden_act": cfg.model.hidden_act,
-                "intermediate_size": cfg.model.intermediate_size,
-                "layer_norm_eps": cfg.model.layer_norm_eps,
-                "num_attention_heads": cfg.model.num_attention_heads,
-                "num_hidden_layers": cfg.model.num_hidden_layers,
-            }
+    if use_strideformer:
+        second_model_config = dict(
+            freeze_first_model=cfg.model.freeze_first_model,
+            max_chunks=cfg.model.max_chunks,
+            num_hidden_layers=cfg.model.num_hidden_layers,
+            num_attention_heads=cfg.model.num_attention_heads,
+            intermediate_size=cfg.model.intermediate_size,
+            hidden_act=cfg.model.hidden_act,
+            dropout=cfg.model.dropout,
+            layer_norm_eps=cfg.model.layer_norm_eps,
+            initializer_range=cfg.model.initializer_range,
+            hidden_size=model_config.hidden_size,
+            label2id=data_module.label2id,
+            id2label=data_module.id2label,
+            num_labels=len(data_module.label2id),
+            )
+        model_config = StrideformerConfig.from_two_configs(
+            first_model_config=model_config,
+            second_model_config=second_model_config,
         )
-
-        model = Strideformer.from_pretrained(
-            cfg.model.model_name_or_path, config=model_config
+        
+    if use_strideformer:
+        model = Strideformer(
+            config=model_config
         )
     else:
         model = AutoModelForSequenceClassification.from_pretrained(
@@ -455,11 +461,6 @@ def main(cfg: DictConfig) -> None:
     if training_args.report_to:
         if accelerator.is_main_process:
             experiment_config = OmegaConf.to_container(cfg)
-
-            if "mlflow" in training_args.report_to:
-                training_args = mlflow_tracker.save_training_args(training_args)
-                experiment_config["training_arguments"] = training_args
-                
             experiment_config.update(model.config.to_diff_dict())
                 
             accelerator.init_trackers(cfg.project_name, flatten_dict(experiment_config))

@@ -43,8 +43,6 @@ class Strideformer(PreTrainedModel):
     def __init__(
         self,
         config: StrideformerConfig,
-        first_model_config_path: Optional[Union[str, os.PathLike]] = None,
-        first_init: Optional[bool] = False,
     ) -> None:
         """
         Initializes Strideformer model with random values.
@@ -54,30 +52,18 @@ class Strideformer(PreTrainedModel):
             config (StrideformerConfig):
                 Configuration file for this model. Holds the information for what
                 pretrained model to use for the first model and all of the parameters
-                for the hidden_size,
+                for the hidden_size
         """
         super().__init__(
             config,
         )
         self.config = config
-
-        self.first_model_config = AutoConfig.from_pretrained(
-            first_model_config_path or config.first_model_name_or_path
-        )
-
-        self.first_model = AutoModel.from_config(self.first_model_config)
+        self.first_model = AutoModel.from_config(self.config.first_model_config)
 
         self.max_chunks = config.max_chunks
 
-        if self.first_model_config.hidden_size != config.hidden_size:
-            raise ValueError(
-                "The hidden size of the first model \
-                {self.first_model_config.hidden_size} needs to be the same \
-                size as the hidden size of the second model {config.hidden_size}"
-            )
-
         encoder_layer = nn.TransformerEncoderLayer(
-            d_model=config.hidden_size,
+            d_model=self.config.first_model_config.hidden_size,
             nhead=config.num_attention_heads,
             dim_feedforward=config.intermediate_size,
             dropout=config.dropout,
@@ -88,14 +74,13 @@ class Strideformer(PreTrainedModel):
         self.second_model = nn.TransformerEncoder(
             encoder_layer, num_layers=config.num_hidden_layers
         )
-        self.classifier = nn.Linear(config.hidden_size, config.num_labels)
+        self.classifier = nn.Linear(self.config.first_model_config.hidden_size, config.num_labels)
 
-        self._init_weights(self.modules(), self.config.initializer_range)
+        self.post_init()
         
-        if first_init:
-            self.first_model = AutoModel.from_pretrained(
-                config.first_model_name_or_path
-            )
+        self.first_model = AutoModel.from_pretrained(
+                self.config.first_model_config._name_or_path
+        )
 
     @staticmethod
     def mean_pooling(
@@ -250,83 +235,20 @@ class Strideformer(PreTrainedModel):
             second_model_hidden_states=second_model_hidden_states,
         )
 
-    @classmethod
-    def from_pretrained(
-        cls,
-        pretrained_model_name_or_path: Optional[Union[str, os.PathLike]],
-        *model_args,
-        **kwargs
-    ):
-        """
-        Loads the model weights, the model.config, and the model.first_model_config from
-        `pretrained_model_name_or_path`.
 
-        Note: This is NOT the function that should be called the first time you create a
-        Strideformer model. Even though the first model comes pretrained, the
-        `Strideformer.from_pretrained` method is for loading after the second model
-        has been trained.
-
-        To load the model the first time, use `Strideformer(config, first_init=True)`
-
-        Args:
-            pretrained_model_name_or_path (`str` or `os.PathLike`):
-                A path to a *directory* containing model weights saved using
-                [`Strideformer.save_pretrained`], e.g., `./my_model_directory/`.
-
-        Returns:
-            (Strideformer) with pretrained weights loaded.
-        """
-        first_model_path = str(
-            Path(pretrained_model_name_or_path) / "first_model_config.json"
-        )
-
-
-        return super().from_pretrained(
-            pretrained_model_name_or_path,
-            first_model_config_path=first_model_path,
-            first_init=False,
-            *model_args,
-            **kwargs,
-        )
-
-    def save_pretrained(
-        self, save_directory: Optional[Union[str, os.PathLike]], *args, **kwargs
-    ):
-        """
-        Saves the model, the model.config, and the model.first_model_config to
-        `save_directory`.
-
-        Args:
-            save_directory (`str` or `os.PathLike`):
-                Directory to which to save. Will be created if it doesn't exist.
-        """
-        self.first_model_config.save_pretrained(save_directory)
-        first_model_config_path = Path(save_directory) / "config.json"
-        first_model_config_path.replace(
-            Path(save_directory) / "first_model_config.json"
-        )
-
-        super().save_pretrained(save_directory, *args, **kwargs)
-
-    @staticmethod
-    def _init_weights(modules: Iterator[nn.Module], std: float = 0.02) -> None:
-        """
-        Reinitializes every Linear, Embedding, and LayerNorm module provided.
-        Args:
-            modules (Iterator of `torch.nn.Module`)
-                Iterator of modules to be initialized. Typically by calling Module.modules()
-            std (`float`, *optional*, defaults to 0.02)
-                Standard deviation for normally distributed weight initialization
-        """
-        for module in modules:
-            if isinstance(module, torch.nn.Linear):
-                module.weight.data.normal_(mean=0.0, std=std)
-                if module.bias is not None:
-                    module.bias.data.zero_()
-            elif isinstance(module, torch.nn.Embedding):
-                module.weight.data.normal_(mean=0.0, std=std)
-                if module.padding_idx is not None:
-                    module.weight.data[module.padding_idx].zero_()
-            elif isinstance(module, torch.nn.LayerNorm):
+    # From: https://github.com/huggingface/transformers/blob/31e3c6c393964d3e470c8229741b444d7ce94941/src/transformers/models/bert/modeling_bert.py#L748
+    def _init_weights(self, module):
+        """Initialize the weights"""
+        if isinstance(module, nn.Linear):
+            # Slightly different from the TF version which uses truncated_normal for initialization
+            # cf https://github.com/pytorch/pytorch/pull/5617
+            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
+            if module.bias is not None:
                 module.bias.data.zero_()
-                module.weight.data.fill_(1.0)
+        elif isinstance(module, nn.Embedding):
+            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
+            if module.padding_idx is not None:
+                module.weight.data[module.padding_idx].zero_()
+        elif isinstance(module, nn.LayerNorm):
+            module.bias.data.zero_()
+            module.weight.data.fill_(1.0)

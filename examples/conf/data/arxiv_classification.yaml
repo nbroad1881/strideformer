@@ -1,5 +1,5 @@
 dataset_name: 'ccdv/arxiv-classification'
-dataset_config_name: null
+dataset_config_name: "no_ref"
 max_seq_length: 512
 truncation: yes
 pad_multiple: 8

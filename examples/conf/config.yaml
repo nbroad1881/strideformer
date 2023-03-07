@@ -1,7 +1,7 @@
 # Default configuration
 
 defaults:
-  - data: default
+  - data: health_fact
   - training_arguments: default
   - model: default
   - mlflow: default
@@ -10,13 +10,16 @@ defaults:
 
 
 model:
-  model_name_or_path:  "sentence-transformers/all-mpnet-base-v2"
-  short_model_max_chunks: 128
-  hidden_act: gelu
-  intermediate_size: 4096
-  layer_norm_eps: 1e-7
+  model_name_or_path: "sentence-transformers/all-MiniLM-L12-v2"
+  freeze_first_model: no
+  max_chunks: 128
+  num_hidden_layers: 48
   num_attention_heads: 12
-  num_hidden_layers: 36
+  intermediate_size: 2048
+  hidden_act: gelu
+  dropout: 0.1
+  layer_norm_eps: 1e-7
+  initializer_range: 0.02
 
   
 data:
@@ -25,7 +28,6 @@ data:
   stride: 128
   n_rows: 2000
   map_batch_size: 500 # batch size when using `datasets.map`
-  dataset_name: null
   data_files:
     train:
       - 'full_train.csv'
@@ -39,21 +41,21 @@ training_arguments:
   evaluation_strategy: "epoch"
   fp16: yes
   
-  learning_rate: 7e-6
+  learning_rate: 2e-6
   per_device_train_batch_size: 2
   per_device_eval_batch_size: 16
   gradient_accumulation_steps: 1
   
   metric_for_best_model: "f1_micro"
   greater_is_better: yes
-  report_to: "mlflow"
+  report_to: "wandb"
   log_level: "warning"
   save_strategy: "epoch"
-  logging_steps: 10
+  logging_steps: 100
   save_total_limit: 2
   
 # general configuration
-num_proc: 2
+num_proc: 8
 task: text-classification
 language: en
 project_name: stride-former

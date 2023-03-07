@@ -23,12 +23,16 @@ class StrideformerCollator:
 
     def __call__(self, features: List[Dict]):
         """
-        Put features in a format that the model can use.
+        Put features in a format that the model can use. The dataloader will pass a list
+        of dictionaries to this function. Each dictionary will have keys: input_ids, attention_mask, labels.
+
+        This function will combine these dictionaries into a single dictionary with keys: input_ids, attention_mask, labels.
+        Each value in the dictionary will be a tensor.
 
         Args:
             features (`List[Dict]`):
                 The list will be as long as the batch size specified
-                passed to the DataLoader.ffffffffffffffffffffffffffff
+                passed to the DataLoader.
                 Each element of features will have keys: input_ids, attention_mask, labels
                 input_ids will be of shape [num_chunks, sequence_length]
                 attention_mask will be of shape [num_chunks, sequence_length]

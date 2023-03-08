@@ -15,7 +15,7 @@ per_device_train_batch_size: 8
 per_device_eval_batch_size: 8
 gradient_accumulation_steps: 1
 gradient_checkpointing: no
-group_by_length: yes
+group_by_length: no
 learning_rate: 5e-5
 weight_decay: 0.0
 seed: 42
@@ -58,6 +58,9 @@ half_precision_backend: "auto"
 bf16_full_eval: no
 fp16_full_eval: no
 tf32: no
+
+# compile
+torch_compile: no
 
 # evaluation/prediction
 do_eval: no
@@ -117,5 +120,5 @@ push_to_hub_token: null
 mp_parameters: ''
 auto_find_batch_size: no
 full_determinism: no
-torchdynamo: no
+torchdynamo: null
 ray_scope: last

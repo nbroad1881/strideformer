@@ -53,23 +53,9 @@ class DataModule:
         self.label2id = processor.get_label2id()
         self.id2label = {i: l for l, i in self.label2id.items()}
 
-    def get_train_dataset(self, tokenized: bool = True) -> Dataset:
+    def get_dataset(self, split: str, tokenized: bool = True) -> Dataset:
         ds_attr = "tokenized_dataset" if tokenized else "raw_dataset"
-        return getattr(self, ds_attr)["train"]
-
-    def get_eval_dataset(self, tokenized: bool = True) -> Dataset:
-        ds_attr = "tokenized_dataset" if tokenized else "raw_dataset"
-
-        if "validation" not in getattr(self, ds_attr):
-            return None
-        return getattr(self, ds_attr)["validation"]
-
-    def get_test_dataset(self, tokenized: bool = True) -> Dataset:
-        ds_attr = "tokenized_dataset" if tokenized else "raw_dataset"
-
-        if "test" not in getattr(self, ds_attr):
-            return None
-        return getattr(self, ds_attr)["test"]
+        return getattr(self, ds_attr)[split]
 
 
 class GenericDatasetProcessor:

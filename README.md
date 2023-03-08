@@ -48,10 +48,45 @@ pip install strideformer
 
 ```python
 from strideformer import StrideformerConfig, Strideformer
+from transformers import AutoConfig, AutoTokenizer
 
-cfg = StrideformerConfig()
-model = Strideformer.from_pretrained("sentence-transformers/all-MiniLM-L6-v2", config=cfg)
+label2id = {"positive": 0, "negative": 1}
+id2label = {"0": "positive", "1": "negative"}
 
+first_model_name = "sentence-transformers/all-MiniLM-L6-v2"
+
+first_model_config = AutoConfig.from_pretrained(
+            first_model_name,
+            label2id=label2id,
+            id2label=id2label,
+            num_labels=len(label2id),
+    )
+second_model_config = dict(
+            freeze_first_model=False, # Train first model?
+            max_chunks=128, # Maximum number of chunks to consider
+            num_hidden_layers=24,
+            num_attention_heads=12,
+            intermediate_size=4096,
+            hidden_act="gelu",
+            dropout=0.1,
+            layer_norm_eps=1e-7,
+            initializer_range=0.02,
+            hidden_size=first_model_config.hidden_size, # Needs to match first model
+            label2id=label2id,
+            id2label=id2label,
+            num_labels=len(label2id),
+            )
+
+model_config = StrideformerConfig.from_two_configs(
+            first_model_config=first_model_config,
+            second_model_config=second_model_config,
+        )
+
+model = Strideformer(
+            config=model_config
+        )
+
+tokenizer = AutoTokenizer.from_pretrained(first_model_name)
 # Set the max_length and stride to whatever values you like (256, 128 are good starting points)
 inputs = tokenizer(
     ["Here is a bunch of text that should be strided over"],
@@ -73,12 +108,22 @@ print(outputs)
 #                     tensor([[ 0.4127, -0.2096]], grad_fn=<MeanBackward1>)),
 #                    ('first_model_hidden_states', None),
 #                    ('second_model_hidden_states', None)])
+
+output_path = "trained_strideformer"
+model.save_pretrained(output_path)
+
+# `from_pretrained` is only to be used after training Strideformer
+# Use `Strideformer(config)` before training
+loaded_model = Strideformer.from_pretrained(output_path)
 ```
 
 
 ## Basic run
 
-Start by installing the required packages in the examples folder using `pip install -r requirements.txt`. Some additional packages might also be necessary depending on the tracking framework and models chosen (see [here](#optional-packages)). Then change the values inside `conf/config.yaml` to your desired parameters. If you set `data.stride` to 0 or null, then it will just run normally.  
+Start by installing the required packages in the examples folder using `pip install -r requirements.txt`. Some additional packages might also be necessary depending on the tracking framework and models chosen (see [here](#optional-packages)). Then change the values inside `examples/conf/config.yaml` to your desired parameters. If you set `data.stride` to <=0 or null, then it will train with a regular approach (no strides).  
+
+- `examples/run_classification.py` uses the Hugging Face Trainer and abstracts much of the training complexities away.  
+- `examples/run_classification_no_trainer.py` uses Hugging Face Accelerate and allows for more customization.
 
 ```sh
 python run_classification.py
